@@ -1,479 +1,308 @@
-"use client"
-
-import { type MouseEvent, useState } from "react"
-import Link from "next/link"
-import { motion, AnimatePresence } from "framer-motion"
+import type { Metadata } from "next";
+import Image from "next/image";
 import {
+  ArrowDown,
+  ArrowUpRight,
   ArrowRight,
-  Building2,
-  Layers,
-  MapPinned,
-  ShieldAlert,
   Waves,
-  Menu,
-  X,
-} from "lucide-react"
+  Layers,
+  ScanLine,
+} from "lucide-react";
+import { LandingNavigation } from "@/components/landing/navigation";
+import {
+  HeroFilm,
+  Reveal,
+  TerritoryExplorer,
+} from "@/components/landing/experience";
+import styles from "./page.module.css";
 
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import ThemeToggle from "@/components/theme-toggle"
-import { Logo } from "@/components/logo"
-import Footer from "@/components/footer"
-import Landing3DBackground from "@/components/landing-3d-background"
-import { GlowingEffect } from "@/components/ui/glowing-effect"
-// import CinematicHeroSection from "@/components/ui/ethereal";
-
-
-const pipeline = [
+const title = "OrbTalus | Um novo olhar sobre o território";
+const description =
+  "Contexto territorial para equipes de água e esgoto. Conheça o protótipo OrbTalus e seu fluxo de avaliação inicial de exposição a inundações.";
+export const metadata: Metadata = {
+  title: { absolute: title },
+  description,
+  openGraph: {
+    title,
+    description,
+    type: "website",
+    locale: "pt_BR",
+    images: ["/media/river-poster.jpg"],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+    images: ["/media/river-poster.jpg"],
+  },
+};
+const steps = [
   {
-    title: "1. Captura geoespacial",
-    description:
-      "Recebe um poligono GeoJSON ou area por raio, identifica rios proximos e cria o contexto geografico da analise.",
+    icon: ScanLine,
+    title: "Localize",
+    text: "Uma localização representativa é o ponto de partida para conhecer a instalação e seu entorno.",
   },
   {
-    title: "2. Enriquecimento ambiental",
-    description:
-      "Cruza altitude (SRTM), solo (MapBiomas) e frequencia de agua com fallback de proximidade para rios canalizados.",
+    icon: Layers,
+    title: "Conecte",
+    text: "Relevo, hidrografia, cobertura e presença histórica de água compõem a leitura territorial.",
   },
   {
-    title: "3. Motor de risco explicavel",
-    description:
-      "Aplica um algoritmo deterministico com pesos fixos, classificacao objetiva e historico persistido para auditoria.",
+    icon: Waves,
+    title: "Interprete",
+    text: "Um indicador por regras e uma explicação assistida por IA ajudam a organizar a avaliação inicial.",
   },
   {
-    title: "4. Entrega de laudo tecnico",
-    description:
-      "Retorna nivel de risco, distancia ao rio, queda relativa e explicacao em linguagem natural com contexto tecnico.",
+    icon: ArrowUpRight,
+    title: "Investigue",
+    text: "Sua equipe revisa as evidências e decide o próximo passo: vistoria, estudo ou investigação complementar.",
   },
-]
-
-const riskWeights = [
-  { label: "Topografia", value: "50%", note: "Distancia ao rio + queda relativa" },
-  { label: "Agua", value: "30%", note: "Frequencia satelital + fallback de proximidade" },
-  { label: "Solo", value: "20%", note: "Permeabilidade por classe ambiental" },
-]
-
-const transparencyNotes = [
-  "Modelo atual usa SRTM 30m, com limite em micro-topografia urbana.",
-  "Cobertura hidrografica depende da qualidade de mapeamento no OSM.",
-  "Frequencia de agua usa MapBiomas e fallback quando rio canalizado nao aparece no satelite.",
-]
-
-/* ---- animation helpers ---- */
-const fadeUp = {
-  hidden: { opacity: 0, y: 28 },
-  visible: { opacity: 1, y: 0 },
-}
-
-const fadeIn = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1 },
-}
-
-const staggerContainer = {
-  hidden: {},
-  visible: { transition: { staggerChildren: 0.12 } },
-}
-
-const viewportOnce = { once: true, margin: "-60px" as const }
-
-export default function Home() {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-
-  const handleSectionNavigation = (event: MouseEvent<HTMLAnchorElement>, sectionId: string) => {
-    event.preventDefault()
-    const section = document.getElementById(sectionId)
-    if (!section) return
-
-    section.scrollIntoView({ behavior: "smooth", block: "start" })
-    setIsMobileMenuOpen(false)
-  }
-
+];
+export default function HomePage() {
   return (
-    <>
-      <Landing3DBackground />
-      <main className="relative z-10 overflow-hidden pb-20">
-
-        {/* Header */}
-        <motion.header
-          initial={{ opacity: 0, y: -16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur"
-        >
-          <div className="mx-auto flex h-20 w-full max-w-6xl items-center justify-between px-4">
-            <Link href="/" className="py-2">
-              <Logo width={80} height={80} textClassName="text-2xl font-bold tracking-wide" />
-            </Link>
-            <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
-              <a
-                href="#problema"
-                className="hover:text-foreground transition-colors"
-                onClick={(event) => handleSectionNavigation(event, "problema")}
-              >
-                Problema
-              </a>
-              <a
-                href="#motor"
-                className="hover:text-foreground transition-colors"
-                onClick={(event) => handleSectionNavigation(event, "motor")}
-              >
-                Motor de risco
-              </a>
-              <a
-                href="#stack"
-                className="hover:text-foreground transition-colors"
-                onClick={(event) => handleSectionNavigation(event, "stack")}
-              >
-                Stack tecnico
-              </a>
-            </nav>
-            <div className="flex items-center gap-2">
-              <ThemeToggle />
-              <Button asChild size="sm" className="hidden md:flex">
-                <Link href="/analise">Abrir analise</Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="md:hidden"
-                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              >
-                {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-              </Button>
-            </div>
+    <div className={styles.page} id="inicio">
+      <a className={styles.skipLink} href="#conteudo">
+        Pular para o conteúdo
+      </a>
+      <section className={styles.hero} aria-labelledby="hero-title">
+        <HeroFilm />
+        <header className={`${styles.container} ${styles.header}`}>
+          <a
+            className={styles.brand}
+            href="#inicio"
+            aria-label="OrbTalus — início"
+          >
+            <Image
+              src="/orbtalus-simbolo-branco-teal-v1.svg"
+              alt=""
+              width={64}
+              height={64}
+              priority
+            />
+            <span>
+              OrbTalus<small>INTELIGÊNCIA TERRITORIAL</small>
+            </span>
+          </a>
+          <LandingNavigation />
+        </header>
+        <div className={`${styles.container} ${styles.heroContent}`}>
+          <p className={styles.eyebrow}>
+            <span /> ÁGUA, TERRITÓRIO E INFRAESTRUTURA
+          </p>
+          <h1 id="hero-title">
+            O risco tem contexto.
+            <br />
+            <span>Enxergue além.</span>
+          </h1>
+          <p className={styles.heroDescription}>
+            Um novo olhar sobre o entorno da sua instalação.
+            <br className={styles.desktopBreak} /> Mais contexto para preparar a
+            próxima investigação.
+          </p>
+          <div className={styles.actions}>
+            <a className={styles.primaryLink} href="/analise">
+              Explore o território <ArrowUpRight size={20} />
+            </a>
+            <a className={styles.textLink} href="#conversa">
+              Vamos conversar <ArrowRight size={18} />
+            </a>
           </div>
-
-          {/* Mobile Menu */}
-          <AnimatePresence>
-            {isMobileMenuOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.2 }}
-                className="border-t border-border/70 bg-background/95 backdrop-blur md:hidden"
-              >
-                <nav className="flex flex-col gap-4 p-4 text-sm text-muted-foreground">
-                  <a
-                    href="#problema"
-                    className="block w-full rounded-md px-2 py-2 hover:bg-accent/50 hover:text-foreground"
-                    onClick={(event) => handleSectionNavigation(event, "problema")}
-                  >
-                    Problema
-                  </a>
-                  <a
-                    href="#motor"
-                    className="block w-full rounded-md px-2 py-2 hover:bg-accent/50 hover:text-foreground"
-                    onClick={(event) => handleSectionNavigation(event, "motor")}
-                  >
-                    Motor de risco
-                  </a>
-                  <a
-                    href="#stack"
-                    className="block w-full rounded-md px-2 py-2 hover:bg-accent/50 hover:text-foreground"
-                    onClick={(event) => handleSectionNavigation(event, "stack")}
-                  >
-                    Stack tecnico
-                  </a>
-                  <Button asChild className="mt-2 w-full justify-center">
-                    <Link href="/analise" onClick={() => setIsMobileMenuOpen(false)}>
-                      Abrir analise
-                    </Link>
-                  </Button>
-                </nav>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.header>
-
-        {/* Hero */}
-        <section className="mx-auto grid w-full max-w-6xl gap-8 px-4 pb-20 pt-16 md:grid-cols-[1.2fr_0.8fr] md:pt-24">
-        <motion.div
-          initial="hidden"
-          animate="visible"
-          variants={staggerContainer}
-        >
-          <motion.p
-            variants={fadeUp}
-            transition={{ duration: 0.6 }}
-            className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary"
-          >
-            <ShieldAlert className="h-3.5 w-3.5" />
-            Deep Hazard Intelligence para risco hidrologico
-          </motion.p>
-          <motion.h1
-            variants={fadeUp}
-            transition={{ duration: 0.7 }}
-            className="max-w-2xl text-4xl font-semibold leading-tight tracking-tight text-balance md:text-6xl"
-          >
-            O risco real nao aparece em mapa parado no tempo.
-          </motion.h1>
-          <motion.p
-            variants={fadeUp}
-            transition={{ duration: 0.7 }}
-            className="mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground"
-          >
-            O GeoRisk transforma incerteza climatica em decisao tecnica em segundos.
-            Cruzamos rios, relevo, solo e historico de agua para mostrar o que um mapa
-            estatico nao enxerga: drenagens ocultas, vulnerabilidade local e risco auditavel.
-          </motion.p>
-          <motion.div
-            variants={fadeUp}
-            transition={{ duration: 0.6 }}
-            className="mt-8 flex flex-wrap items-center gap-3"
-          >
-            <Button asChild size="lg" className="w-full rounded-full px-7 sm:w-auto">
-              <Link href="/analise">
-                Testar analise interativa
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="lg" className="w-full rounded-full px-7 sm:w-auto">
-              <a href="mailto:guilerstudies@gmail.com?subject=Contato%20GeoRisk">
-                Falar com o time
-              </a>
-            </Button>
-          </motion.div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, x: 30, scale: 0.97 }}
-          animate={{ opacity: 1, x: 0, scale: 1 }}
-          transition={{ duration: 0.8, delay: 0.3 }}
-        >
-          <Card className="relative border-border/70 bg-card/85 shadow-xl shadow-primary/10">
-            <GlowingEffect spread={40} glow={true} disabled={false} proximity={64} inactiveZone={0.01} />
-            <div className="relative z-10 w-full h-full flex flex-col">
-            <CardHeader>
-              <CardTitle>O que muda com GeoRisk</CardTitle>
-              <CardDescription>
-                Da leitura reativa para uma analise tecnica explicavel e reproducivel.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div className="rounded-lg border border-border/70 bg-background/70 p-4">
-                <p className="font-medium">Sem GeoRisk</p>
-                <p className="mt-1 text-muted-foreground">
-                  Decisoes baseadas em mapas historicos, sem leitura de rios canalizados e
-                  pouca transparência sobre o risco calculado.
-                </p>
-              </div>
-              <div className="rounded-lg border border-accent/40 bg-accent/15 p-4">
-                <p className="font-medium">Com GeoRisk</p>
-                <p className="mt-1 text-muted-foreground">
-                  Score rastreavel por componente, contexto ambiental e laudo tecnico para
-                  seguradoras, imobiliarias e gestores urbanos.
-                </p>
-              </div>
-            </CardContent>
-            </div>
-          </Card>
-        </motion.div>
+        </div>
+        <div className={`${styles.container} ${styles.heroBottom}`}>
+          <span>PARA EQUIPES DE ÁGUA E ESGOTO</span>
+          <a href="#conteudo">
+            Conheça a proposta <ArrowDown size={18} />
+          </a>
+        </div>
       </section>
-
-      {/* Problema / Solução */}
-      <section id="problema" className="mx-auto w-full max-w-6xl px-4 py-8">
-        <motion.div
-          initial="hidden"
-          whileInView="visible"
-          viewport={viewportOnce}
-          variants={staggerContainer}
-          className="grid gap-6 md:grid-cols-2"
+      <main id="conteudo" tabIndex={-1}>
+        <section className={`${styles.container} ${styles.intro}`}>
+          <Reveal>
+            <p className={styles.sectionLabel}>01 — AMPLIE A PERSPECTIVA</p>
+          </Reveal>
+          <Reveal>
+            <h2>
+              Uma instalação nunca
+              <br />
+              existe <em>isolada.</em>
+            </h2>
+            <p className={styles.lead}>
+              O rio ao lado. A forma do relevo. O que cobre o solo. Cada
+              elemento muda as perguntas que sua equipe precisa fazer.
+            </p>
+            <p className={styles.bodyCopy}>
+              O OrbTalus está sendo desenvolvido para reunir esse contexto e
+              apoiar a avaliação inicial de exposição a inundações. Um ponto de
+              partida para investigar, em diálogo com o GIS, os estudos e a
+              experiência de campo da sua equipe.
+            </p>
+          </Reveal>
+        </section>
+        <section
+          className={styles.exploreSection}
+          id="exemplo"
+          tabIndex={-1}
+          aria-labelledby="explore-title"
         >
-          <motion.div variants={fadeUp} transition={{ duration: 0.6 }}>
-            <Card className="relative border-border/70 bg-card/85 h-full">
-              <GlowingEffect spread={40} glow={true} disabled={false} proximity={64} inactiveZone={0.01} />
-              <div className="relative z-10 w-full h-full flex flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Waves className="h-4 w-4 text-primary" />
-                  Problema
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                A analise de risco atual ainda depende de historico defasado e leitura manual.
-                Isso deixa passar rios canalizados, solo impermeavel e mudancas urbanas recentes.
-              </CardContent>
+          <div className={styles.container}>
+            <Reveal className={styles.sectionHeading}>
+              <div>
+                <p className={styles.sectionLabel}>02 — LEIA AS CAMADAS</p>
+                <h2 id="explore-title">
+                  O mesmo lugar.
+                  <br />
+                  <em>Novas perspectivas.</em>
+                </h2>
               </div>
-            </Card>
-          </motion.div>
-          <motion.div variants={fadeUp} transition={{ duration: 0.6 }}>
-            <Card className="relative border-border/70 bg-card/85 h-full">
-              <GlowingEffect spread={40} glow={true} disabled={false} proximity={64} inactiveZone={0.01} />
-              <div className="relative z-10 w-full h-full flex flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <MapPinned className="h-4 w-4 text-primary" />
-                  Solucao
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm leading-relaxed text-muted-foreground">
-                O GeoRisk gera uma analise espacial em tempo quase real com logica explicita:
-                calcula risco por fatores tecnicos e entrega um resultado pronto para decisao.
-              </CardContent>
-              </div>
-            </Card>
-          </motion.div>
-        </motion.div>
-      </section>
-
-      {/* Pipeline */}
-      <section id="stack" className="mx-auto w-full max-w-6xl px-4 py-14">
-        <motion.div
-          initial="hidden"
-          whileInView="visible"
-          viewport={viewportOnce}
-          variants={staggerContainer}
-          className="mb-7"
-        >
-          <motion.h2
-            variants={fadeUp}
-            transition={{ duration: 0.6 }}
-            className="text-3xl font-semibold tracking-tight md:text-4xl"
-          >
-            Como a plataforma funciona
-          </motion.h2>
-          <motion.p
-            variants={fadeUp}
-            transition={{ duration: 0.6 }}
-            className="mt-3 max-w-3xl text-muted-foreground"
-          >
-            Arquitetura orientada a rastreabilidade: cada etapa do resultado tem origem
-            tecnica clara, do dado geoespacial ao laudo final.
-          </motion.p>
-        </motion.div>
-        <motion.div
-          initial="hidden"
-          whileInView="visible"
-          viewport={viewportOnce}
-          variants={staggerContainer}
-          className="grid gap-4 md:grid-cols-2"
-        >
-          {pipeline.map((step) => (
-            <motion.div key={step.title} variants={fadeUp} transition={{ duration: 0.5 }}>
-              <Card className="relative border-border/70 bg-card/80 h-full">
-                <GlowingEffect spread={40} glow={true} disabled={false} proximity={64} inactiveZone={0.01} />
-                <div className="relative z-10 w-full h-full flex flex-col">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">{step.title}</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
-                  {step.description}
-                </CardContent>
-                </div>
-              </Card>
-            </motion.div>
-          ))}
-        </motion.div>
-      </section>
-
-      {/* Motor de risco */}
-      <section id="motor" className="mx-auto w-full max-w-6xl px-4 py-8">
-        <motion.div
-          initial="hidden"
-          whileInView="visible"
-          viewport={viewportOnce}
-          variants={staggerContainer}
-          className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]"
-        >
-          <motion.div variants={fadeUp} transition={{ duration: 0.6 }}>
-            <Card className="relative border-border/70 bg-card/85 h-full">
-              <GlowingEffect spread={40} glow={true} disabled={false} proximity={64} inactiveZone={0.01} />
-              <div className="relative z-10 w-full h-full flex flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Layers className="h-4 w-4 text-primary" />
-                  Motor de risco auditavel
-                </CardTitle>
-                <CardDescription>
-                  Formula principal: total = topografia x 0.50 + agua x 0.30 + solo x 0.20
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3 sm:grid-cols-3">
-                {riskWeights.map((weight, i) => (
-                  <motion.div
-                    key={weight.label}
-                    initial={{ opacity: 0, y: 16 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 0.4, delay: i * 0.1 }}
-                    className="rounded-lg border border-border/70 bg-background/60 p-4"
-                  >
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                      {weight.label}
-                    </p>
-                    <p className="mt-1 text-2xl font-semibold">{weight.value}</p>
-                    <p className="mt-2 text-xs text-muted-foreground">{weight.note}</p>
-                  </motion.div>
-                ))}
-              </CardContent>
-              </div>
-            </Card>
-          </motion.div>
-
-          <motion.div variants={fadeUp} transition={{ duration: 0.6 }}>
-            <Card className="relative border-border/70 bg-card/85 h-full">
-              <GlowingEffect spread={40} glow={true} disabled={false} proximity={64} inactiveZone={0.01} />
-              <div className="relative z-10 w-full h-full flex flex-col">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-primary" />
-                  Transparencia tecnica
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm text-muted-foreground">
-                {transparencyNotes.map((item, i) => (
-                  <motion.p
-                    key={item}
-                    initial={{ opacity: 0, x: -12 }}
-                    whileInView={{ opacity: 1, x: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 0.4, delay: i * 0.08 }}
-                    className="rounded-md border border-border/70 bg-background/60 p-3"
-                  >
-                    {item}
-                  </motion.p>
-                ))}
-              </CardContent>
-              </div>
-            </Card>
-          </motion.div>
-        </motion.div>
-      </section>
-
-      {/* CTA */}
-      <motion.section
-        initial={{ opacity: 0, y: 30 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={viewportOnce}
-        transition={{ duration: 0.7 }}
-        className="mx-auto mt-14 w-full max-w-6xl px-4"
-      >
-        <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-r from-primary/10 via-card to-accent/15 shadow-lg shadow-primary/10">
-          <GlowingEffect spread={40} glow={true} disabled={false} proximity={64} inactiveZone={0.01} />
-          <div className="relative z-10 w-full">
-          <CardContent className="flex flex-col items-start justify-between gap-4 py-8 md:flex-row md:items-center">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-primary">
-                Pronto para decisao operacional
+              <p>
+                Explore quatro fatores que ajudam a compreender o entorno.
+                Selecione uma camada para conhecer seu papel.
               </p>
-              <h3 className="mt-1 text-2xl font-semibold text-balance">
-                Acesse a analise interativa e veja o risco por coordenada.
-              </h3>
-            </div>
-            <Button asChild size="lg" className="w-full rounded-full px-7 md:w-auto">
-              <Link href="/analise">
-                Ir para analise
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-          </CardContent>
+            </Reveal>
+            <TerritoryExplorer />
           </div>
-        </Card>
-        </motion.section>
+        </section>
+        <section
+          className={`${styles.container} ${styles.workflow}`}
+          id="como-funciona"
+          tabIndex={-1}
+          aria-labelledby="flow-title"
+        >
+          <Reveal className={styles.sectionHeading}>
+            <div>
+              <p className={styles.sectionLabel}>
+                03 — DO CONTEXTO À INVESTIGAÇÃO
+              </p>
+              <h2 id="flow-title">
+                Dados conectados.
+                <br />
+                Decisões <em>com critério.</em>
+              </h2>
+            </div>
+            <p>
+              Um fluxo proposto para o protótipo.
+              <br />A revisão técnica permanece com sua equipe.
+            </p>
+          </Reveal>
+          <ol className={styles.steps}>
+            {steps.map((step, index) => (
+              <li key={step.title}>
+                <Reveal>
+                  <div className={styles.stepTop}>
+                    <span>0{index + 1}</span>
+                    <step.icon size={25} strokeWidth={1.2} />
+                  </div>
+                  <h3>{step.title}</h3>
+                  <p>{step.text}</p>
+                </Reveal>
+              </li>
+            ))}
+          </ol>
+        </section>
+        <section
+          className={styles.principles}
+          aria-labelledby="principles-title"
+        >
+          <div className={`${styles.container} ${styles.principlesGrid}`}>
+            <Reveal>
+              <p className={styles.sectionLabel}>CLAREZA TAMBÉM É TECNOLOGIA</p>
+              <h2 id="principles-title">
+                Uma leitura inicial.
+                <br />
+                Com limites <em>visíveis.</em>
+              </h2>
+              <p>
+                Para usar um indicador com responsabilidade, é preciso entender
+                o que está por trás dele.
+              </p>
+            </Reveal>
+            <div className={styles.principleList}>
+              <Reveal>
+                <span>01</span>
+                <div>
+                  <h3>O ponto e o entorno</h3>
+                  <p>
+                    A leitura parte de uma localização representativa. Ela não
+                    equivale a avaliar toda a área do imóvel.
+                  </p>
+                </div>
+              </Reveal>
+              <Reveal>
+                <span>02</span>
+                <div>
+                  <h3>Indicador com contexto</h3>
+                  <p>
+                    A nota por regras é preliminar. Não é uma probabilidade
+                    calibrada de inundação nem um laudo conclusivo.
+                  </p>
+                </div>
+              </Reveal>
+              <Reveal>
+                <span>03</span>
+                <div>
+                  <h3>IA com revisão humana</h3>
+                  <p>
+                    A explicação assistida apoia a interpretação. Qualidade dos
+                    dados, limitações e coerência precisam ser examinadas pela
+                    equipe.
+                  </p>
+                </div>
+              </Reveal>
+            </div>
+          </div>
+        </section>
+        <section
+          className={`${styles.container} ${styles.conversation}`}
+          id="conversa"
+          tabIndex={-1}
+          aria-labelledby="contact-title"
+        >
+          <Reveal>
+            <p className={styles.sectionLabel}>VAMOS CONSTRUIR ESSA CONVERSA</p>
+            <h2 id="contact-title">
+              Qual é a próxima pergunta
+              <br />
+              sobre o <em>seu território?</em>
+            </h2>
+            <p>
+              Queremos entender como sua equipe prepara uma avaliação e onde o
+              contexto territorial pode ajudar.
+            </p>
+          </Reveal>
+          <Reveal className={styles.contactCard}>
+            <span className={styles.contactIcon}>
+              <ArrowUpRight size={30} strokeWidth={1} />
+            </span>
+            <h3>Comece pela tarefa.</h3>
+            <p>Sua organização. Sua decisão. Seu processo atual.</p>
+            <p className={styles.contactNote}>
+              Escreva para conversar sobre sua organização e o contexto do seu
+              território. Não é necessário compartilhar dados sensíveis nessa
+              conversa inicial.
+            </p>
+            <a
+              className={styles.contactLink}
+              href="mailto:guilerstudies@gmail.com"
+            >
+              guilerstudies@gmail.com <ArrowUpRight size={18} aria-hidden="true" />
+            </a>
+          </Reveal>
+        </section>
       </main>
-      <Footer />
-    </>
-  )
+      <footer className={styles.footer}>
+        <div className={styles.container}>
+          <a href="#inicio" className={styles.footerBrand}>
+            OrbTalus <ArrowUpRight size={22} />
+          </a>
+          <span>Território. Contexto. Investigação.</span>
+          <a href="#inicio">
+            Voltar ao topo <ArrowUpRight size={16} />
+          </a>
+        </div>
+        <div className={`${styles.container} ${styles.footerFine}`}>
+          <span>© {new Date().getFullYear()} Equipe OrbTalus</span>
+        </div>
+      </footer>
+    </div>
+  );
 }
