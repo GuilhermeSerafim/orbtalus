@@ -1,6 +1,6 @@
 declare module "@mapbox/mapbox-gl-geocoder" {
     import { IControl, LngLatLike, Map } from "mapbox-gl";
-  
+
     export interface GeocoderOptions {
       accessToken?: string;
       mapboxgl?: typeof import("mapbox-gl");
@@ -11,14 +11,14 @@ declare module "@mapbox/mapbox-gl-geocoder" {
       bbox?: number[];
       proximity?: LngLatLike;
     }
-  
+
     export default class MapboxGeocoder implements IControl {
       constructor(options?: GeocoderOptions);
       onAdd(map: Map): HTMLElement;
       onRemove(): void;
-      getResult(): any;
-      on(type: string, listener: (e: any) => void): void;
-      off(type: string, listener: (e: any) => void): void;
+      getResult(): unknown;
+      on<Event = unknown>(type: string, listener: (e: Event) => void): void;
+      off<Event = unknown>(type: string, listener: (e: Event) => void): void;
     }
   }
-  
+

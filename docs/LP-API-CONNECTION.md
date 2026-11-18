@@ -40,4 +40,29 @@ Review the draft changes, validate the exact locked frontend dependencies and pr
 
 Integration checks on 18 November 2026: clean dependency installation, `npm run typecheck`, and all 296 `npm run test:analysis` checks passed in this PR worktree. The latter used simulated SDK/HTTP boundaries with zero unmocked egress; it is not a browser/provider certification. The Mapbox geocoder receives the SDK module namespace to satisfy its typed contract, rather than an unchecked type assertion. Production build and lint were not run in this integration pass.
 
-`npm audit --omit=dev` reported 12 production-dependency findings: 1 critical, 8 high, and 3 moderate. The retained Next 16.0.10 is among the affected direct dependencies. This draft deliberately does not fold a dependency upgrade into the LP integration. Resolve and verify these findings before production; do not run an automatic force upgrade or interpret passing UI tests as security clearance.
+The follow-up dependency pass on 18 November 2026 reproduced 12 production findings
+(1 critical, 8 high, 3 moderate), upgraded Next from 16.0.10 to 16.4.6, removed
+unused direct Zod/resolver dependencies after checking source imports, and updated
+affected transitive packages within their declared ranges without `--force`.
+Both production-only and full dependency audits then reported zero known
+vulnerabilities. This is a point-in-time advisory check, not a security guarantee.
+TypeScript and all 296 guarded regression checks passed after the runtime update.
+
+ESLint was missing despite the existing lint script. The follow-up installs
+ESLint 10.15.0 and matching Next flat presets without rule overrides. Eight
+reported errors were resolved through selection/event typing, helper declaration
+order, an equivalent input type alias, a constant angle, and imperative canvas
+visibility in the unused legacy 3D background. The final lint run reports zero
+errors and eleven warnings. TypeScript and all 296 guarded checks pass on this
+delta. ESLint requires Node `^20.19.0 || ^22.13.0 || >=24`; local verification
+uses Node 22.18.0. React 18 remains supported by Next's peer contract but deprecated
+for a future Next 17 upgrade. No runtime/provider analysis is implied by these checks.
+
+The final production webpack build (`node node_modules/next/dist/bin/next build
+--webpack`, scoped `NODE_OPTIONS=--max-old-space-size=2048`) exited successfully,
+including `/`, `/analise`, and `/icon.svg`. This local build does not establish
+cloud API access. A read-only Vercel configuration check found that the existing
+shared public API variable still selects the historical Google Cloud Run backend,
+not Render. Its value was not changed. Switch only after the new API origin and
+exact frontend CORS are verified; changing it may affect production as well as
+preview/development because the existing variable targets all three environments.

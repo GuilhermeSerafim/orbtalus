@@ -11,7 +11,6 @@
     "test:analysis": "node --import ./tests/support/network-guard.mjs --import tsx --test --test-concurrency=1 tests/api-original-contract.test.ts tests/GeoRiskMap.test.tsx tests/button.test.tsx tests/network-guard.test.mjs"
   },
   "dependencies": {
-    "@hookform/resolvers": "^3.10.0",
     "@mapbox/mapbox-gl-geocoder": "^5.1.2",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",
@@ -54,7 +53,7 @@
     "lucide-react": "^0.454.0",
     "mapbox-gl": "^3.16.0",
     "motion": "^12.35.2",
-    "next": "16.0.10",
+    "next": "16.4.6",
     "next-themes": "^0.4.6",
     "react": "^18.3.1",
     "react-day-picker": "9.8.0",
@@ -67,8 +66,7 @@
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.183.2",
-    "vaul": "^0.9.9",
-    "zod": "3.25.76"
+    "vaul": "^0.9.9"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.9",
@@ -78,6 +76,8 @@
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
     "@types/three": "^0.183.1",
+    "eslint": "10.15.0",
+    "eslint-config-next": "16.4.6",
     "jsdom": "26.1.0",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
