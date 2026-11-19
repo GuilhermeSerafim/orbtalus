@@ -10,7 +10,7 @@ const geist = Geist({ subsets: ["latin"], variable: "--font-geist" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://geo-risk-front.vercel.app"),
+  metadataBase: new URL("https://orbtalus.vercel.app"),
   title: {
     default: "OrbTalus | Inteligencia territorial",
     template: "%s | OrbTalus",
