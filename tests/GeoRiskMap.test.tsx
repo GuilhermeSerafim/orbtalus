@@ -92,6 +92,14 @@ function contextEvent(map: typeof state.maps[number], type: 'webglcontextlost' |
   act(() => map.canvas.dispatchEvent(new window.Event(type, { cancelable: true })));
 }
 
+test('shows a single quota warning directly on the map after HTTP 429', async () => {
+  const { view, map } = mount();
+  click(map);
+  await act(async () => { requests[0].resolve(new Response(null, {status: 429})); });
+  assert.equal(view.getAllByText('Limite diário de análises atingido. Tente novamente mais tarde.').length, 1);
+  assert.doesNotMatch(text(view), /Falha na analise/);
+});
+
 test('successful theme replacement completes the SDK full-load lifecycle without false timeout or report loss', async (t) => {
   const { timers } = captureMapTimeouts(t);
   const { view, map } = mount(); click(map); await resolve(0, response('THEME_REPORT'));
