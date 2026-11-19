@@ -192,6 +192,10 @@ for (const status of [422,503,500,401]) for (const body of ['<html>secret token 
   reply = async () => new Response(body,{status});
   await rejects(status === 422 ? messages.input : status === 503 ? messages.config : messages.generic);
 });
+test('shows a fixed daily quota message for HTTP 429', async () => {
+  reply = async () => new Response(JSON.stringify({detail: {message: 'upstream secret'}}), {status: 429});
+  await rejects('Limite diário de análises atingido. Tente novamente mais tarde.');
+});
 test('does not trust error codes for an unrelated status', async () => {
   reply = async () => new Response(JSON.stringify({detail:{code:'AI_UNAVAILABLE'}}),{status:500});
   await rejects(messages.generic);

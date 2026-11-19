@@ -165,6 +165,7 @@ export async function postRiskPolygon(polygon: Polygon | Feature<Polygon>): Prom
     throw new Error(MESSAGES.network);
   }
   if (!res.ok) {
+    if (res.status === 429) throw new Error("Limite diário de análises atingido. Tente novamente mais tarde.");
     if (res.status === 422) throw new Error(MESSAGES.input);
     if (res.status === 503) {
       const body: unknown = await res.json().catch(() => null);
