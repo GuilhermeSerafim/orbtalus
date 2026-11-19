@@ -3,6 +3,7 @@ import { circle as turfCircle } from "@turf/turf";
 
 export type RiskLevel = "baixo" | "medio" | "alto";
 export const RISK_QUOTA_MESSAGE = "Limite diário de análises atingido. Tente novamente mais tarde.";
+export const HYDROLOGY_UNAVAILABLE_MESSAGE = "Os dados de rios e córregos nesta área são insuficientes para classificar o risco.";
 
 type FactorScores = {
   topography?: number;
@@ -56,6 +57,7 @@ const MESSAGES = {
 const UNAVAILABLE_MESSAGES: Record<string, string> = {
   CONFIG_UNAVAILABLE: MESSAGES.config,
   DATA_UNAVAILABLE: "Dados necessários à análise estão indisponíveis. Tente novamente mais tarde.",
+  HYDROLOGY_UNAVAILABLE: HYDROLOGY_UNAVAILABLE_MESSAGE,
   DATABASE_UNAVAILABLE: MESSAGES.generic,
   AI_UNAVAILABLE: "Parecer técnico indisponível. Tente novamente mais tarde.",
 };

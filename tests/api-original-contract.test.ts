@@ -181,6 +181,7 @@ for (const field of ['score_total','topography_score','water_score','soil_score'
 const safeCodes: Record<string,string> = {
   CONFIG_UNAVAILABLE: messages.config,
   DATA_UNAVAILABLE: 'Dados necessários à análise estão indisponíveis. Tente novamente mais tarde.',
+  HYDROLOGY_UNAVAILABLE: 'Os dados de rios e córregos nesta área são insuficientes para classificar o risco.',
   DATABASE_UNAVAILABLE: messages.generic,
   AI_UNAVAILABLE: 'Parecer técnico indisponível. Tente novamente mais tarde.',
 };

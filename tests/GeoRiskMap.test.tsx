@@ -100,6 +100,16 @@ test('shows a single quota warning directly on the map after HTTP 429', async ()
   assert.doesNotMatch(text(view), /Falha na analise/);
 });
 
+test('explains insufficient local hydrography directly on the map without a risk score', async () => {
+  const { view, map } = mount();
+  click(map);
+  await act(async () => { requests[0].resolve(Response.json({ detail: { code: 'HYDROLOGY_UNAVAILABLE' } }, { status: 503 })); });
+  const notice = view.getAllByRole('status').find(element => element.textContent?.includes('rios e córregos'));
+  assert.ok(notice, 'the map announces the reason even before opening an analysis panel');
+  assert.match(notice.textContent ?? '', /insuficientes para classificar o risco/);
+  assert.doesNotMatch(text(view), /Score [\d,]+%|cota é renovada/i);
+});
+
 test('successful theme replacement completes the SDK full-load lifecycle without false timeout or report loss', async (t) => {
   const { timers } = captureMapTimeouts(t);
   const { view, map } = mount(); click(map); await resolve(0, response('THEME_REPORT'));
