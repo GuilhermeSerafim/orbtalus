@@ -1,6 +1,6 @@
 "use client"
 
-import mapboxgl from "mapbox-gl"
+import mapboxgl, * as MapboxGL from "mapbox-gl"
 import MapboxGeocoder from "@mapbox/mapbox-gl-geocoder"
 import * as turf from "@turf/turf"
 import {
@@ -15,19 +15,21 @@ import {
   ShieldAlert,
   ShieldCheck,
   Waves,
+  X,
 } from "lucide-react"
 import { useTheme } from "next-themes"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import ReactMarkdown from "react-markdown"
 import type { Feature, Polygon } from "geojson"
 
-import { postRiskByCenterRadius, type RiskLevel, type RiskResponse } from "@/lib/api"
+import { postRiskByCenterRadius, RISK_QUOTA_MESSAGE, type RiskLevel, type RiskResponse } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Drawer,
   DrawerContent,
+  DrawerClose,
   DrawerDescription,
   DrawerHeader,
   DrawerTitle,
@@ -41,6 +43,8 @@ const MAX_RADIUS = 4000
 const MIN_RADIUS = 100
 const DAY_MAP_STYLE = "mapbox://styles/mapbox/streets-v12"
 const DARK_MAP_STYLE = "mapbox://styles/mapbox/dark-v11"
+const MAP_LOAD_TIMEOUT_MS = 20000
+const MAP_UNAVAILABLE_MESSAGE = "Não foi possível carregar o mapa. Verifique sua conexão e tente novamente."
 const RISK_FACTOR_WEIGHTS = {
   topography: 0.5,
   water: 0.3,
@@ -61,6 +65,9 @@ const GEOLOCATION_OPTIONS: PositionOptions = {
 const USER_LOCATION_ZOOM = 16
 const BRAZIL_OVERVIEW_ZOOM = 4.2
 const AUTO_ANALYZE_DEDUP_WINDOW_MS = 4000
+const subscribeToHydration = () => () => {}
+const clientSnapshot = () => true
+const serverSnapshot = () => false
 
 type InitialLocationResult = {
   center: MapCenter | null
@@ -642,16 +649,22 @@ function parseRadius(inputValue: string) {
 
 export default function GeoRiskMap() {
   const { resolvedTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
+  const mounted = useSyncExternalStore(subscribeToHydration, clientSnapshot, serverSnapshot)
   const effectiveResolvedTheme = mounted ? resolvedTheme : undefined
   const isDarkMode = effectiveResolvedTheme === "dark"
   const mapContainerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const mapStyleRef = useRef<string>(DAY_MAP_STYLE)
+  const cancelStyleLoadRef = useRef<(() => void) | null>(null)
+  // style.load signals a usable style document; optional tiles can still be loading.
+  const styleReadyRef = useRef(false)
+  const mapStatusRef = useRef<"loading" | "ready" | "error">(MAPBOX_TOKEN ? "loading" : "error")
+  const [mapStatus, setMapStatus] = useState<"loading" | "ready" | "error">(MAPBOX_TOKEN ? "loading" : "error")
+  const [mapAttempt, setMapAttempt] = useState(0)
+  const mapGenerationRef = useRef(0)
   const markerRef = useRef<mapboxgl.Marker | null>(null)
   const radiusRef = useRef(DEFAULT_RADIUS)
   const latestRequestRef = useRef(0)
-  const hasResolvedInitialLocationRef = useRef(false)
   const userInitialCenterRef = useRef<MapCenter | null>(cachedInitialLocationResult?.center ?? null)
 
   const [center, setCenter] = useState<MapCenter>(DEFAULT_CENTER)
@@ -659,6 +672,7 @@ export default function GeoRiskMap() {
   const [riskData, setRiskData] = useState<RiskResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const quotaReached = mapStatus === "ready" && error === RISK_QUOTA_MESSAGE
   const [isLocatingUser, setIsLocatingUser] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(cachedInitialLocationResult?.error ?? null)
   const [hasSelection, setHasSelection] = useState(false)
@@ -667,6 +681,36 @@ export default function GeoRiskMap() {
 
   const totalScore = getTotalScore(riskData)
   const normalizedRiskLevel = deriveRiskLevel(riskData?.risk_level, totalScore)
+  const currentMapStateRef = useRef({ center, radius, requestedRadius: radius, normalizedRiskLevel, isLoading, hasSelection, error, is3DMode, effectiveResolvedTheme })
+  // Preserve an existing selection when Fast Refresh re-runs effects.
+  currentMapStateRef.current.requestedRadius ??= radius
+  // SDK callbacks can run before React commits. Update this snapshot at each
+  // transition; a passive render snapshot must never overwrite newer events.
+  useEffect(() => {
+    currentMapStateRef.current.effectiveResolvedTheme = effectiveResolvedTheme
+  }, [effectiveResolvedTheme])
+  const markMapUnavailable = useCallback(() => {
+    mapStatusRef.current = "error"
+    styleReadyRef.current = false
+    latestRequestRef.current += 1
+    Object.assign(currentMapStateRef.current, { normalizedRiskLevel: undefined, isLoading: false, error: null })
+    setMapStatus("error")
+    setRiskData(null)
+    setError(null)
+    setIsLoading(false)
+    setIsLocatingUser(false)
+    setIsDesktopAnalysisOpen(false)
+  }, [])
+  const retryMap = useCallback(() => {
+    if (mapStatusRef.current !== "error") return
+    latestRequestRef.current += 1
+    mapGenerationRef.current += 1
+    mapStatusRef.current = MAPBOX_TOKEN ? "loading" : "error"
+    setMapStatus(mapStatusRef.current)
+    setMapAttempt((attempt) => attempt + 1)
+  }, [])
+  const mapStatusLabel = mapStatus === "error" ? "Mapa indisponível" : "Carregando mapa..."
+  const mapStatusMessage = mapStatus === "error" ? MAP_UNAVAILABLE_MESSAGE : "Aguarde o carregamento do mapa."
   const topographyScore = pickNumber(
     riskData?.topografia_score,
     riskData?.topography_score,
@@ -688,9 +732,18 @@ export default function GeoRiskMap() {
     hasSelection,
     hasError: Boolean(error),
   })
-  const statusBadgeLabel = isLocatingUser ? "Localizando você..." : riskDisplay.label
-  const showStatusSpinner = isLoading || isLocatingUser
+  const statusBadgeLabel = mapStatus !== "ready" ? mapStatusLabel : quotaReached
+    ? "Cota diária atingida" : isLocatingUser ? "Localizando você..." : riskDisplay.label
+  const showStatusSpinner = mapStatus === "loading" || isLoading || isLocatingUser
   const desktopPanelId = "desktop-analysis-panel"
+  const openDesktopAnalysis = () => {
+    setIsDesktopAnalysisOpen(true)
+    requestAnimationFrame(() => document.getElementById(`${desktopPanelId}-content`)?.focus())
+  }
+  const closeDesktopAnalysis = () => {
+    setIsDesktopAnalysisOpen(false)
+    requestAnimationFrame(() => document.getElementById(`${desktopPanelId}-trigger`)?.focus())
+  }
   const soilData = riskData?.environmental_data?.soil
   const widgetTone = getRiskWidgetTone(isDarkMode)
   const hasAiFeedback = Boolean(riskData?.resposta_ia?.trim())
@@ -726,8 +779,8 @@ export default function GeoRiskMap() {
         : isDarkMode
           ? "border-slate-800 bg-slate-900/90 text-slate-300"
           : "border-slate-200 bg-slate-50 text-slate-600"
-  const mobileFeedbackStateLabel = error
-    ? "Falha na leitura"
+  const mobileFeedbackStateLabel = mapStatus !== "ready" ? mapStatusLabel : error
+    ? quotaReached ? "Cota diária atingida" : "Falha na leitura"
     : showStatusSpinner
       ? hasAiFeedback
         ? "Atualizando"
@@ -752,7 +805,7 @@ export default function GeoRiskMap() {
         : isDarkMode
           ? "border-white/10 bg-white/5 text-slate-200"
           : "border-slate-200 bg-slate-100 text-slate-600"
-  const mobileFeedbackHelperText = error
+  const mobileFeedbackHelperText = mapStatus !== "ready" ? mapStatusMessage : error
     ? error
     : showStatusSpinner
       ? hasAiFeedback
@@ -765,8 +818,8 @@ export default function GeoRiskMap() {
         : hasSelection
           ? "A sintese aparecera aqui assim que a leitura tecnica for concluida."
           : "Selecione um ponto no mapa ou pesquise um endereco para receber uma leitura interpretativa."
-  const mobileFeedbackEmptyTitle = error
-    ? "Nao foi possivel concluir a sintese"
+  const mobileFeedbackEmptyTitle = mapStatus !== "ready" ? mapStatusLabel : error
+    ? quotaReached ? "Quando tentar novamente" : "Nao foi possivel concluir a sintese"
     : showStatusSpinner
       ? isLocatingUser
         ? "Localizando o ponto"
@@ -774,8 +827,8 @@ export default function GeoRiskMap() {
       : hasSelection
         ? "Aguardando conclusao da analise"
         : "Pronto para receber a leitura"
-  const mobileFeedbackEmptyCopy = error
-    ? error
+  const mobileFeedbackEmptyCopy = mapStatus !== "ready" ? mapStatusMessage : error
+    ? quotaReached ? "A cota é renovada às 21h, no horário de Brasília." : error
     : showStatusSpinner
       ? isLocatingUser
         ? "Assim que a localizacao estiver disponivel, vamos iniciar a analise automaticamente."
@@ -848,10 +901,6 @@ export default function GeoRiskMap() {
     },
   ]
 
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
   function clearCircleLayers() {
     const map = mapRef.current
     if (!map) return
@@ -866,9 +915,9 @@ export default function GeoRiskMap() {
     }
   }
 
-  function drawCircle(nextCenter: MapCenter, nextRadius: number, color: string) {
+  const drawCircle = useCallback((nextCenter: MapCenter, nextRadius: number, color: string) => {
     const map = mapRef.current
-    if (!map || !map.isStyleLoaded()) return
+    if (!map || !styleReadyRef.current) return
 
     const circle = turf.circle([nextCenter.lng, nextCenter.lat], nextRadius / 1000, {
       steps: 64,
@@ -915,11 +964,11 @@ export default function GeoRiskMap() {
     markerRef.current = new mapboxgl.Marker({ element: wrapper })
       .setLngLat([nextCenter.lng, nextCenter.lat])
       .addTo(map)
-  }
+  }, [])
 
   function disable3DMode() {
     const map = mapRef.current
-    if (!map) return
+    if (!map || !styleReadyRef.current) return
 
     map.easeTo({ pitch: 0, bearing: 0, duration: 800 })
     map.setTerrain(null)
@@ -931,9 +980,9 @@ export default function GeoRiskMap() {
     }
   }
 
-  function enable3DMode() {
+  const enable3DMode = useCallback(() => {
     const map = mapRef.current
-    if (!map) return
+    if (!map || !styleReadyRef.current) return
 
     if (!map.getSource("mapbox-dem")) {
       map.addSource("mapbox-dem", {
@@ -982,13 +1031,19 @@ export default function GeoRiskMap() {
     }
 
     map.easeTo({ pitch: 58, bearing: -18, duration: 800 })
-  }
+  }, [])
 
-  async function drawAndAnalyze(nextCenter: MapCenter, nextRadius: number) {
+  const drawAndAnalyze = useCallback(async (nextCenter: MapCenter, nextRadius: number) => {
     const map = mapRef.current
-    if (!map) return
+    if (!map || mapStatusRef.current === "error") return
 
     const requestId = ++latestRequestRef.current
+    Object.assign(currentMapStateRef.current, {
+      center: nextCenter, radius: nextRadius, requestedRadius: nextRadius, normalizedRiskLevel: undefined,
+      isLoading: true, hasSelection: true, error: null,
+    })
+    setRiskData(null)
+    setIsDesktopAnalysisOpen(false)
     setIsLoading(true)
     setError(null)
 
@@ -1003,8 +1058,9 @@ export default function GeoRiskMap() {
 
       if (requestId !== latestRequestRef.current) return
 
-      setRiskData(data)
       const dataLevel = deriveRiskLevel(data.risk_level, getTotalScore(data))
+      Object.assign(currentMapStateRef.current, { normalizedRiskLevel: dataLevel, isLoading: false, error: null })
+      setRiskData(data)
       const dataColor = getRiskDisplay({
         level: dataLevel,
         isLoading: false,
@@ -1015,45 +1071,92 @@ export default function GeoRiskMap() {
     } catch (apiError) {
       if (requestId !== latestRequestRef.current) return
 
+      const message = apiError instanceof Error ? apiError.message : "Falha ao consultar a API de risco."
+      Object.assign(currentMapStateRef.current, { normalizedRiskLevel: undefined, isLoading: false, error: message })
       setRiskData(null)
-      setError(apiError instanceof Error ? apiError.message : "Falha ao consultar a API de risco.")
+      setError(message)
       drawCircle(nextCenter, nextRadius, "#64748b")
     } finally {
       if (requestId === latestRequestRef.current) {
+        currentMapStateRef.current.isLoading = false
         setIsLoading(false)
       }
     }
-  }
-
-  useEffect(() => {
-    radiusRef.current = radius
-  }, [radius])
+  }, [drawCircle])
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return
 
-    if (!MAPBOX_TOKEN) {
-      setError("NEXT_PUBLIC_MAPBOX_TOKEN nao configurado. Defina no .env para renderizar o mapa.")
-      return
-    }
+    if (!MAPBOX_TOKEN) return
 
-    const initialStyle = getMapStyle(effectiveResolvedTheme)
+    const initialStyle = getMapStyle(currentMapStateRef.current.effectiveResolvedTheme)
     mapStyleRef.current = initialStyle
 
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: initialStyle,
-      center: [DEFAULT_CENTER.lng, DEFAULT_CENTER.lat],
-      zoom: BRAZIL_OVERVIEW_ZOOM,
-      pitch: 58,
-      bearing: -18,
-      antialias: true,
-    })
+    const current = currentMapStateRef.current
+    let isMapDisposed = false
+    const generation = mapGenerationRef.current
+    // The SDK can throw after adding canvas/host listeners, before new returns
+    // an instance we can remove. Detach that entire DOM ownership boundary.
+    const mapHost = document.createElement("div")
+    mapHost.className = "h-full w-full"
+    mapContainerRef.current.appendChild(mapHost)
+    let map: mapboxgl.Map
+    try {
+      map = new mapboxgl.Map({
+        container: mapHost,
+        style: initialStyle,
+        center: [current.center.lng, current.center.lat],
+        zoom: current.hasSelection ? USER_LOCATION_ZOOM : BRAZIL_OVERVIEW_ZOOM,
+        pitch: current.is3DMode ? 58 : 0,
+        bearing: current.is3DMode ? -18 : 0,
+        antialias: true,
+      })
+    } catch {
+      mapHost.remove()
+      queueMicrotask(() => {
+        if (!isMapDisposed && generation === mapGenerationRef.current) markMapUnavailable()
+      })
+      return () => { isMapDisposed = true; mapHost.remove() }
+    }
 
     mapRef.current = map
-    let isMapDisposed = false
+    let hasManualSelection = current.hasSelection
+    let hasRequestedInitialLocation = false
+    let geocoder: MapboxGeocoder | null = null
+    let hasLostContext = false
+    const isCurrentMap = () => !isMapDisposed && generation === mapGenerationRef.current && mapRef.current === map && mapStatusRef.current !== "error"
+    const loadTimeout = window.setTimeout(() => {
+      if (isCurrentMap() && !hasRequestedInitialLocation) markMapUnavailable()
+    }, MAP_LOAD_TIMEOUT_MS)
+    const handleMapError = (event: { error: Error; sourceId?: string; tile?: unknown }) => {
+      // Source/tile errors alone do not mean the base style is unavailable.
+      if (!isCurrentMap() || event.sourceId || event.tile || styleReadyRef.current) return
+      markMapUnavailable()
+    }
+    map.on("error", handleMapError)
+    const handleContextLost = () => {
+      if (!isCurrentMap()) return
+      hasLostContext = true
+      window.clearTimeout(loadTimeout)
+      cancelStyleLoadRef.current?.()
+      cancelStyleLoadRef.current = null
+      markMapUnavailable()
+    }
+    const handleContextRestored = () => {
+      if (!hasLostContext || isMapDisposed || generation !== mapGenerationRef.current || mapRef.current !== map) return
+      // Restored GL resources do not establish that the style is usable. A fresh
+      // attempt shares manual retry's load gate, timeout and request invalidation.
+      hasLostContext = false
+      retryMap()
+    }
+    map.on("webglcontextlost", handleContextLost)
+    map.on("webglcontextrestored", handleContextRestored)
 
     const handleMapClick = (event: mapboxgl.MapMouseEvent) => {
+      if (!isCurrentMap()) return
+      hasManualSelection = true
+      setIsLocatingUser(false)
+      setLocationError(null)
       const nextCenter = { lng: event.lngLat.lng, lat: event.lngLat.lat }
       setCenter(nextCenter)
       setHasSelection(true)
@@ -1061,9 +1164,13 @@ export default function GeoRiskMap() {
     }
 
     const handleGeocoderResult = (event: { result?: { center?: [number, number] } }) => {
+      if (!isCurrentMap()) return
       const resultCenter = event.result?.center
       if (!resultCenter) return
 
+      hasManualSelection = true
+      setIsLocatingUser(false)
+      setLocationError(null)
       const nextCenter = { lng: resultCenter[0], lat: resultCenter[1] }
       setCenter(nextCenter)
       setHasSelection(true)
@@ -1071,12 +1178,18 @@ export default function GeoRiskMap() {
       void drawAndAnalyze(nextCenter, radiusRef.current)
     }
 
-    map.on("load", () => {
+    const handleMapLoad = () => {
+      if (!isCurrentMap() || hasRequestedInitialLocation) return
+      hasRequestedInitialLocation = true
+      window.clearTimeout(loadTimeout)
+      styleReadyRef.current = true
+      mapStatusRef.current = "ready"
+      setMapStatus("ready")
       map.on("click", handleMapClick)
 
-      const geocoder = new MapboxGeocoder({
+      geocoder = new MapboxGeocoder({
         accessToken: mapboxgl.accessToken as string,
-        mapboxgl: mapboxgl as any,
+        mapboxgl: MapboxGL,
         marker: false,
         placeholder: "Busque endereco, bairro ou coordenada...",
       })
@@ -1084,20 +1197,33 @@ export default function GeoRiskMap() {
       geocoder.on("result", handleGeocoderResult)
       map.addControl(geocoder, "top-left")
 
-      if (is3DMode) {
+      if (currentMapStateRef.current.is3DMode) {
         enable3DMode()
+      } else {
+        disable3DMode()
       }
 
-      if (hasResolvedInitialLocationRef.current) return
-      hasResolvedInitialLocationRef.current = true
+      if (currentMapStateRef.current.hasSelection) {
+        const selection = currentMapStateRef.current
+        if (selection.normalizedRiskLevel) {
+          // Recreating the map must not discard a completed result or call providers again.
+          drawCircle(selection.center, selection.radius, getRiskDisplay({
+            level: selection.normalizedRiskLevel, isLoading: false, hasSelection: true, hasError: false,
+          }).color)
+          return
+        }
+        void drawAndAnalyze(selection.center, selection.radius)
+        return
+      }
 
       setIsLocatingUser(true)
       setLocationError(null)
 
       void getInitialUserLocation().then((result) => {
-        if (isMapDisposed || mapRef.current !== map) return
+        if (!isCurrentMap()) return
 
         setIsLocatingUser(false)
+        if (hasManualSelection) return
         setLocationError(result.error)
 
         if (!result.center) {
@@ -1105,6 +1231,7 @@ export default function GeoRiskMap() {
         }
 
         userInitialCenterRef.current = result.center
+        Object.assign(currentMapStateRef.current, { center: result.center, hasSelection: true })
         setCenter(result.center)
         setHasSelection(true)
         map.flyTo({
@@ -1117,74 +1244,133 @@ export default function GeoRiskMap() {
           void drawAndAnalyze(result.center, DEFAULT_RADIUS)
         }
       })
-    })
+    }
+    map.on("load", handleMapLoad)
 
     return () => {
       isMapDisposed = true
+      window.clearTimeout(loadTimeout)
+      styleReadyRef.current = false
+      latestRequestRef.current += 1
+      cancelStyleLoadRef.current?.()
+      cancelStyleLoadRef.current = null
+      map.off("load", handleMapLoad)
+      map.off("error", handleMapError)
+      map.off("webglcontextlost", handleContextLost)
+      map.off("webglcontextrestored", handleContextRestored)
       map.off("click", handleMapClick)
+      if (geocoder) {
+        geocoder.off("result", handleGeocoderResult)
+        map.removeControl(geocoder)
+      }
       markerRef.current?.remove()
       markerRef.current = null
       map.remove()
+      mapHost.remove()
       mapRef.current = null
     }
-  }, [])
+  }, [drawAndAnalyze, enable3DMode, mapAttempt, markMapUnavailable, retryMap])
 
   useEffect(() => {
-    if (!hasSelection) return
+    const selection = currentMapStateRef.current
+    if (!selection.hasSelection || selection.requestedRadius === radius) return
 
     const timeout = window.setTimeout(() => {
-      void drawAndAnalyze(center, radius)
+      const current = currentMapStateRef.current
+      if (current.hasSelection) void drawAndAnalyze(current.center, radius)
     }, 350)
 
     return () => window.clearTimeout(timeout)
-  }, [radius])
+  }, [radius, drawAndAnalyze])
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
+    if (!map || mapStatusRef.current === "error") return
 
     const nextStyle = getMapStyle(effectiveResolvedTheme)
     if (nextStyle === mapStyleRef.current) return
 
     mapStyleRef.current = nextStyle
-    map.setStyle(nextStyle)
+    styleReadyRef.current = false
+    mapStatusRef.current = "loading"
 
-    map.once("style.load", () => {
-      const level = deriveRiskLevel(riskData?.risk_level, totalScore)
+    let isCancelled = false
+    const generation = mapGenerationRef.current
+    queueMicrotask(() => {
+      if (!isCancelled && generation === mapGenerationRef.current && mapRef.current === map) setMapStatus(mapStatusRef.current)
+    })
+    const styleTimeout = window.setTimeout(() => {
+      if (!isCancelled && generation === mapGenerationRef.current && mapRef.current === map && !styleReadyRef.current) markMapUnavailable()
+    }, MAP_LOAD_TIMEOUT_MS)
+    const handleStyleLoad = () => {
+      if (isCancelled || generation !== mapGenerationRef.current || mapRef.current !== map || mapStatusRef.current === "error") return
+      window.clearTimeout(styleTimeout)
+      map.off("style.load", handleStyleLoad)
+      styleReadyRef.current = true
+      mapStatusRef.current = "ready"
+      setMapStatus("ready")
+      const current = currentMapStateRef.current
       const color = getRiskDisplay({
-        level,
-        isLoading,
-        hasSelection,
-        hasError: Boolean(error),
+        level: current.normalizedRiskLevel,
+        isLoading: current.isLoading,
+        hasSelection: current.hasSelection,
+        hasError: Boolean(current.error),
       }).color
 
-      if (hasSelection) {
-        drawCircle(center, radius, color)
+      if (current.hasSelection) {
+        drawCircle(current.center, current.radius, color)
       }
 
-      if (is3DMode) {
+      if (current.is3DMode) {
         enable3DMode()
+      } else {
+        disable3DMode()
       }
-    })
-  }, [effectiveResolvedTheme, hasSelection, center, radius, is3DMode, riskData, totalScore, isLoading, error])
-
-  useEffect(() => {
-    if (!riskData) {
-      setIsDesktopAnalysisOpen(false)
     }
-  }, [riskData])
+    map.on("style.load", handleStyleLoad)
+    const cancelStyleLoad = () => {
+      if (isCancelled) return
+      isCancelled = true
+      window.clearTimeout(styleTimeout)
+      map.off("style.load", handleStyleLoad)
+    }
+    cancelStyleLoadRef.current = cancelStyleLoad
+    try {
+      // Successful SDK diffs do not emit style.load, which gates this lifecycle.
+      // 3.16 types require both font fields: preserve the constructor's SDK defaults.
+      map.setStyle(nextStyle, {
+        diff: false,
+        localFontFamily: null,
+        localIdeographFontFamily: "sans-serif",
+      })
+    } catch {
+      queueMicrotask(() => {
+        if (!isCancelled && generation === mapGenerationRef.current && mapRef.current === map) markMapUnavailable()
+      })
+    }
+    return cancelStyleLoad
+  }, [effectiveResolvedTheme, drawCircle, enable3DMode, markMapUnavailable])
 
   function handleRadiusChange(value: string) {
-    setRadius(parseRadius(value))
+    const nextRadius = parseRadius(value)
+    radiusRef.current = nextRadius
+    currentMapStateRef.current.radius = nextRadius
+    setRadius(nextRadius)
   }
 
   function handleReset() {
     const map = mapRef.current
     const resetCenter = userInitialCenterRef.current ?? DEFAULT_CENTER
     const resetZoom = userInitialCenterRef.current ? USER_LOCATION_ZOOM : BRAZIL_OVERVIEW_ZOOM
+    radiusRef.current = DEFAULT_RADIUS
+    Object.assign(currentMapStateRef.current, {
+      center: resetCenter, radius: DEFAULT_RADIUS, normalizedRiskLevel: undefined,
+      isLoading: false, error: null, hasSelection: false, is3DMode: false,
+    })
     setCenter(resetCenter)
     setRadius(DEFAULT_RADIUS)
     setRiskData(null)
+    setIsLoading(false)
     setError(null)
     setHasSelection(false)
     setIs3DMode(false)
@@ -1204,7 +1390,8 @@ export default function GeoRiskMap() {
     const map = mapRef.current
     if (!map) return
 
-    const nextMode = !is3DMode
+    const nextMode = !currentMapStateRef.current.is3DMode
+    currentMapStateRef.current.is3DMode = nextMode
     setIs3DMode(nextMode)
     if (nextMode) {
       enable3DMode()
@@ -1215,53 +1402,11 @@ export default function GeoRiskMap() {
 
   const renderRiskEngineContent = () => (
     <div className="space-y-4">
-      <Card className={cn("gap-4 overflow-hidden py-4 border-none lg:border-solid", widgetTone.shell)}>
+      <Card className={cn("gap-4 overflow-hidden py-4 border-none lg:gap-3 lg:py-3 lg:border-solid", widgetTone.shell)}>
         <CardHeader className="px-4">
           <CardTitle className={cn("text-base tracking-tight", widgetTone.title)}>Motor de risco</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 px-4 text-sm">
-          <div
-            className={cn(
-              "rounded-[1.25rem] border p-4",
-              widgetTone.summaryBase,
-              overallRiskAppearance.panel
-            )}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className={cn("text-[11px] font-medium uppercase tracking-[0.24em]", widgetTone.eyebrow)}>
-                  Nota de risco final
-                </p>
-                <div className="mt-3 flex flex-wrap items-end gap-3">
-                  <span className={cn("text-4xl font-semibold tracking-tight", overallRiskAppearance.text)}>
-                    {formatPercent(totalScore)}
-                  </span>
-                  <span
-                    className={cn(
-                      "mb-1 inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
-                      overallRiskAppearance.badge
-                    )}
-                  >
-                    {overallRiskAppearance.label}
-                  </span>
-                </div>
-                <p className={cn("mt-3 max-w-[28ch] text-xs leading-5", widgetTone.copy)}>
-                  Media ponderada: Topografia 50%, Historico de agua 30% e Solo 20%.
-                </p>
-              </div>
-
-              <div
-                className={cn(
-                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border",
-                  overallRiskAppearance.indicator,
-                  overallRiskAppearance.pulse && "animate-pulse"
-                )}
-              >
-                <SummaryIcon className="h-5 w-5" />
-              </div>
-            </div>
-          </div>
-
           <div className="space-y-3">
             {riskFactors.map((factor) => {
               const appearance = getFactorScoreAppearance(factor.score, isDarkMode)
@@ -1272,7 +1417,7 @@ export default function GeoRiskMap() {
                 <div
                   key={factor.id}
                   className={cn(
-                    "rounded-[1.25rem] border p-4",
+                    "rounded-[1.25rem] border p-4 lg:p-3",
                     widgetTone.factorBase,
                     appearance.panel
                   )}
@@ -1281,7 +1426,7 @@ export default function GeoRiskMap() {
                     <div className="flex min-w-0 items-center gap-3">
                       <div
                         className={cn(
-                          "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
+                          "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border lg:h-8 lg:w-8",
                           appearance.indicator
                         )}
                       >
@@ -1302,7 +1447,7 @@ export default function GeoRiskMap() {
                     </span>
                   </div>
 
-                  <div className="mt-4 flex items-baseline justify-between gap-3">
+                  <div className="mt-4 flex items-baseline justify-between gap-3 lg:mt-2">
                     <span className={cn("text-2xl font-semibold tracking-tight", appearance.text)}>
                       {formatPercent(factor.score)}
                     </span>
@@ -1316,7 +1461,7 @@ export default function GeoRiskMap() {
                     </span>
                   </div>
 
-                  <div className="mt-3">
+                  <div className="mt-3 lg:mt-2">
                     <div
                       className={cn("h-2.5 overflow-hidden rounded-full", widgetTone.progressTrack)}
                       role="progressbar"
@@ -1335,7 +1480,7 @@ export default function GeoRiskMap() {
                     </div>
 
                     <div
-                      className={cn("mt-2 flex items-center justify-between text-[11px]", widgetTone.progressLegend)}
+                      className={cn("mt-2 flex items-center justify-between text-[11px] lg:mt-1", widgetTone.progressLegend)}
                     >
                       <span>0% seguro</span>
                       <span>100% critico</span>
@@ -1343,7 +1488,7 @@ export default function GeoRiskMap() {
                   </div>
 
                   {factor.badges.length > 0 && (
-                    <div className={cn("mt-3 flex flex-wrap gap-2 border-t pt-3", widgetTone.divider)}>
+                    <div className={cn("mt-3 flex flex-wrap gap-2 border-t pt-3 lg:mt-2 lg:pt-2", widgetTone.divider)}>
                       {factor.badges.map((badge) => {
                         const BadgeIcon = badge.icon
 
@@ -1371,7 +1516,7 @@ export default function GeoRiskMap() {
     </div>
   )
 
-  const renderMobileAiFeedback = () => (
+  const renderAiFeedback = () => (
     <section
       className={cn(
         "rounded-[1.5rem] border p-4 shadow-[0_18px_42px_rgba(14,165,233,0.14)]",
@@ -1412,9 +1557,11 @@ export default function GeoRiskMap() {
               {mobileFeedbackStateLabel}
             </span>
           </div>
-          <p className={cn("mt-1 text-sm leading-5", isDarkMode ? "text-slate-300" : "text-slate-600")}>
-            {mobileFeedbackHelperText}
-          </p>
+          {(!quotaReached || riskData) && (
+            <p className={cn("mt-1 text-sm leading-5", isDarkMode ? "text-slate-300" : "text-slate-600")}>
+              {mobileFeedbackHelperText}
+            </p>
+          )}
         </div>
       </div>
 
@@ -1428,7 +1575,7 @@ export default function GeoRiskMap() {
               )}
             >
               <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                Corpo d'agua
+                Corpo d&apos;agua
               </span>
               <p
                 className={cn(
@@ -1497,7 +1644,7 @@ export default function GeoRiskMap() {
 
             <div
               className={cn(
-                "feedback-markdown mt-4 max-h-64 overflow-y-auto pr-1 prose prose-sm max-w-none leading-relaxed",
+                "feedback-markdown mt-4 prose prose-sm max-w-none leading-relaxed",
                 isDarkMode
                   ? "prose-invert prose-headings:text-white prose-p:text-slate-300 prose-strong:text-white prose-li:text-slate-300"
                   : "prose-slate prose-headings:text-slate-900 prose-p:text-slate-700 prose-strong:text-slate-900 prose-li:text-slate-700"
@@ -1557,15 +1704,45 @@ export default function GeoRiskMap() {
   )
 
   return (
-    <section className="grid h-full overflow-hidden rounded-2xl border border-border/80 bg-card/85 shadow-2xl shadow-primary/10 lg:grid-cols-[360px_1fr] lg:grid-rows-1">
-      <aside className="hidden overflow-y-auto border-r border-border/70 bg-background/90 p-4 lg:block">
+    <section className="grid h-full min-h-0 overflow-hidden rounded-2xl border border-border/80 bg-card/85 shadow-2xl shadow-primary/10 lg:min-h-min lg:grid-cols-[360px_1fr] lg:grid-rows-1">
+      <aside
+        aria-label="Motor de risco"
+        tabIndex={0}
+        className="hidden min-h-0 space-y-4 overflow-visible border-r border-border/70 bg-background/90 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary lg:block"
+      >
         {renderRiskEngineContent()}
       </aside>
 
       <div className="relative min-h-[360px] flex-1 overflow-hidden lg:min-h-0">
         <div ref={mapContainerRef} className="h-full w-full" />
 
-        <div className="pointer-events-none absolute inset-x-3 top-16 z-[1] lg:hidden">
+        {mapStatus !== "ready" && (
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-background/90 p-4">
+            <div role={mapStatus === "error" ? "alert" : "status"} className="w-full max-w-sm rounded-xl border border-border bg-background p-5 text-center text-foreground shadow-lg">
+              <p className="font-semibold">{mapStatusLabel}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {mapStatusMessage}
+              </p>
+              {mapStatus === "error" ? (
+                <Button className="mt-4 min-h-11" onClick={retryMap}>Tentar novamente</Button>
+              ) : (
+                <Loader2 aria-hidden="true" className="mx-auto mt-4 h-5 w-5 animate-spin" />
+              )}
+            </div>
+          </div>
+        )}
+
+        {quotaReached && (
+          <div role="status" className="pointer-events-none absolute inset-x-3 top-16 z-20 flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 text-sm leading-5 text-amber-950 shadow-sm dark:border-amber-400/40 dark:bg-slate-950 dark:text-amber-100 lg:inset-x-auto lg:right-4 lg:top-4 lg:max-w-sm">
+            <ShieldAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-semibold">{RISK_QUOTA_MESSAGE}</p>
+              <p className="mt-1">A cota é renovada às 21h, no horário de Brasília.</p>
+            </div>
+          </div>
+        )}
+
+        <div className={cn("pointer-events-none absolute inset-x-3 top-16 z-[1] lg:hidden", quotaReached && "hidden")}>
           <div
             role="status"
             aria-live="polite"
@@ -1602,7 +1779,7 @@ export default function GeoRiskMap() {
           </div>
         </div>
 
-        <div className="pointer-events-none absolute right-3 top-3 z-20 hidden lg:block sm:right-4 sm:top-4">
+        <div className={cn("pointer-events-none absolute right-3 top-3 z-20 hidden sm:right-4 sm:top-4", !quotaReached && "lg:block")}>
           <div
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium shadow-sm",
@@ -1676,14 +1853,25 @@ export default function GeoRiskMap() {
                 Analise Completa
               </Button>
             </DrawerTrigger>
-            <DrawerContent className="max-h-[88vh]">
-              <DrawerHeader className="text-left pb-2">
+            <DrawerContent className="max-h-[88vh] overflow-hidden">
+              <DrawerHeader className="relative shrink-0 pb-2 pr-16 text-left">
                 <DrawerTitle>Analise Completa</DrawerTitle>
                 <DrawerDescription>Feedback da IA primeiro, seguido pelos fatores tecnicos da leitura.</DrawerDescription>
+                <DrawerClose asChild>
+                  <Button variant="ghost" size="icon" className="absolute right-4 top-4 h-11 w-11" aria-label="Fechar analise">
+                    <X className="h-4 w-4" />
+                  </Button>
+                </DrawerClose>
               </DrawerHeader>
-              <div className="overflow-y-auto p-4 pt-0">
+              <div
+                role="region"
+                aria-label="Conteúdo completo da análise"
+                tabIndex={0}
+                data-vaul-no-drag
+                className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-4 pt-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+              >
                 <div className="space-y-4">
-                  {renderMobileAiFeedback()}
+                  {renderAiFeedback()}
                   {renderRiskEngineContent()}
                 </div>
               </div>
@@ -1691,7 +1879,7 @@ export default function GeoRiskMap() {
           </Drawer>
         </div>
 
-        {!hasSelection && (
+        {!hasSelection && mapStatus === "ready" && (
           <div className="pointer-events-none hidden lg:block absolute bottom-8 left-3 z-20 max-w-xs rounded-lg border border-border/70 bg-background/90 p-3 text-sm text-muted-foreground shadow-lg lg:bottom-9 lg:left-4">
             {isLocatingUser
               ? "Detectando sua localizacao para iniciar automaticamente..."
@@ -1706,6 +1894,7 @@ export default function GeoRiskMap() {
             <Button
               variant="outline"
               size="sm"
+              id={`${desktopPanelId}-trigger`}
               aria-expanded={isDesktopAnalysisOpen}
               aria-controls={desktopPanelId}
               className={cn(
@@ -1714,7 +1903,7 @@ export default function GeoRiskMap() {
                   ? "border-white/10 bg-slate-950/60 text-slate-100 hover:border-sky-500/50 hover:bg-slate-900/80"
                   : "border-slate-200/80 bg-white/70 text-slate-800 hover:border-sky-400/50 hover:bg-white/90"
               )}
-              onClick={() => setIsDesktopAnalysisOpen(true)}
+              onClick={openDesktopAnalysis}
             >
               <Eye className="mr-2 h-4 w-4 transition-transform group-hover:scale-110" />
               <span className="font-semibold tracking-tight">Ver Analise Completa</span>
@@ -1725,8 +1914,16 @@ export default function GeoRiskMap() {
         {riskData && isDesktopAnalysisOpen && (
           <div
             id={desktopPanelId}
+            role="region"
+            aria-label="Análise completa"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation()
+                closeDesktopAnalysis()
+              }
+            }}
             className={cn(
-              "hidden lg:flex flex-col absolute bottom-8 right-8 z-20 w-[440px] max-h-[80vh] rounded-[24px] border shadow-2xl backdrop-blur-2xl transition-all duration-500 animate-in fade-in slide-in-from-bottom-8",
+              "hidden lg:flex flex-col absolute bottom-8 right-8 z-20 w-[440px] max-h-[calc(100%_-_4rem)] rounded-[24px] border shadow-2xl backdrop-blur-2xl transition-all duration-500 animate-in fade-in slide-in-from-bottom-8",
               isDarkMode 
                 ? "border-white/10 bg-slate-950/75 shadow-black/80" 
                 : "border-slate-200/60 bg-white/80 shadow-slate-300/50"
@@ -1751,19 +1948,24 @@ export default function GeoRiskMap() {
                 size="icon"
                 aria-label="Fechar analise"
                 className={cn(
-                  "h-8 w-8 shrink-0 rounded-full cursor-pointer ml-3 transition-all duration-200 hover:rotate-90",
+                  "h-11 w-11 shrink-0 rounded-full cursor-pointer ml-3 transition-all duration-200 hover:rotate-90",
                   isDarkMode ? "hover:bg-white/10 text-slate-400 hover:text-white" : "hover:bg-slate-200/80 text-slate-500 hover:text-slate-900"
                 )}
-                onClick={() => setIsDesktopAnalysisOpen(false)}
+                onClick={closeDesktopAnalysis}
               >
                 <Minimize2 className="h-4 w-4" />
               </Button>
             </div>
 
-            <div className="overflow-y-auto p-6 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [&::-webkit-scrollbar-thumb]:rounded-full">
+            <div
+              id={`${desktopPanelId}-content`}
+              role="region"
+              aria-label="Texto completo da análise"
+              tabIndex={0}
+              className="min-h-0 overflow-y-auto overscroll-y-contain p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border/50 [&::-webkit-scrollbar-thumb]:rounded-full">
               <div className="grid grid-cols-[1.5fr_1fr_1fr] gap-3 mb-6 items-stretch">
                 <div className={cn("flex min-h-[98px] flex-col justify-between gap-3 rounded-2xl border p-3", isDarkMode ? "border-white/5 bg-white/[0.02]" : "border-slate-200/50 bg-slate-50/50")}>
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Corpo d'Agua</span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Corpo d&apos;Agua</span>
                   <span className={cn("text-sm font-semibold line-clamp-2 leading-tight break-words", isDarkMode ? "text-slate-200" : "text-slate-800")} title={riskData.rio_mais_proximo}>{riskData.rio_mais_proximo}</span>
                 </div>
                 <div className={cn("flex min-h-[98px] flex-col justify-between gap-3 rounded-2xl border p-3", isDarkMode ? "border-white/5 bg-white/[0.02]" : "border-slate-200/50 bg-slate-50/50")}>

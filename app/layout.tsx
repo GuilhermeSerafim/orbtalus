@@ -12,12 +12,12 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 export const metadata: Metadata = {
   metadataBase: new URL("https://geo-risk-front.vercel.app"),
   title: {
-    default: "GeoRisk | Inteligencia hidrologica para decisao rapida",
-    template: "%s | GeoRisk",
+    default: "OrbTalus | Inteligencia territorial",
+    template: "%s | OrbTalus",
   },
   description:
-    "Plataforma de analise de risco hidrologico com modelo auditavel e dados geoespaciais para seguradoras, mercado imobiliario e gestao urbana.",
-  applicationName: "GeoRisk",
+    "Contexto geoespacial para triagem preliminar de risco hidrologico e conversas sobre operacao territorial.",
+  applicationName: "OrbTalus",
   keywords: [
     "risco hidrologico",
     "analise geoespacial",
@@ -34,30 +34,20 @@ export const metadata: Metadata = {
     type: "website",
     locale: "pt_BR",
     url: "/",
-    title: "GeoRisk | Inteligencia hidrologica para decisao rapida",
+    title: "OrbTalus | Inteligencia territorial",
     description:
-      "Risco geoespacial em segundos com score explicavel por topografia, agua e solo.",
-    siteName: "GeoRisk",
-    images: [
-      {
-        url: "/logo4.png",
-        width: 384,
-        height: 384,
-        alt: "GeoRisk",
-      },
-    ],
+      "Explore o territorio e consulte os fatores usados na triagem preliminar de risco hidrologico.",
+    siteName: "OrbTalus",
   },
   twitter: {
-    card: "summary_large_image",
-    title: "GeoRisk",
+    card: "summary",
+    title: "OrbTalus",
     description:
-      "Analise de risco hidrologico com motor auditavel para decisoes urbanas e securitarias.",
-    images: ["/logo4.png"],
+      "Contexto geoespacial para triagem preliminar de risco hidrologico.",
   },
   icons: {
-    icon: "/logo4.png",
-    shortcut: "/logo4.png",
-    apple: "/logo4.png",
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
   },
 }
 
@@ -71,8 +61,9 @@ export default function RootLayout({
       <body className={`${geist.variable} ${geistMono.variable} font-sans antialiased`}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="light"
+          storageKey="orbtalus-theme"
+          enableSystem={false}
           disableTransitionOnChange
         >
           {children}

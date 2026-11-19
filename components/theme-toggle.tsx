@@ -2,17 +2,17 @@
 
 import { Moon, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
-import { useEffect, useState } from "react"
+import { useSyncExternalStore } from "react"
 
 import { Button } from "@/components/ui/button"
 
+const subscribe = () => () => {}
+const clientSnapshot = () => true
+const serverSnapshot = () => false
+
 export default function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  const mounted = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot)
 
   if (!mounted) {
     return (

@@ -290,7 +290,6 @@ export default function Landing3DBackground() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
-  const [hasWebGL, setHasWebGL] = useState(true);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -401,11 +400,11 @@ export default function Landing3DBackground() {
         (canvas.getContext("experimental-webgl", contextAttributes) as AnyWebGLContext | null);
 
       if (!context) {
-        setHasWebGL(false);
+        canvas.hidden = true;
         return cleanup;
       }
 
-      setHasWebGL(true);
+      canvas.hidden = false;
 
       scene = new THREE.Scene();
       camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 100);
@@ -511,7 +510,7 @@ export default function Landing3DBackground() {
         raf = window.requestAnimationFrame(animate);
       }
     } catch {
-      setHasWebGL(false);
+      canvas.hidden = true;
       cleanup();
     }
 
@@ -520,7 +519,7 @@ export default function Landing3DBackground() {
 
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-      <canvas ref={canvasRef} className={hasWebGL ? "h-full w-full" : "hidden"} />
+      <canvas ref={canvasRef} className="h-full w-full" />
       <div className="absolute inset-0 bg-gradient-to-b from-background/78 via-background/64 to-background/84 dark:from-black/60 dark:via-slate-950/48 dark:to-black/66" />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_22%,rgba(22,163,148,0.14),transparent_42%),radial-gradient(circle_at_82%_10%,rgba(217,119,6,0.12),transparent_38%)]" />
     </div>
