@@ -22,7 +22,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import ReactMarkdown from "react-markdown"
 import type { Feature, Polygon } from "geojson"
 
-import { postRiskByCenterRadius, RISK_QUOTA_MESSAGE, type RiskLevel, type RiskResponse } from "@/lib/api"
+import { HYDROLOGY_UNAVAILABLE_MESSAGE, postRiskByCenterRadius, RISK_QUOTA_MESSAGE, type RiskLevel, type RiskResponse } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -673,6 +673,7 @@ export default function GeoRiskMap() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const quotaReached = mapStatus === "ready" && error === RISK_QUOTA_MESSAGE
+  const mapNotice = mapStatus === "ready" && (quotaReached || error === HYDROLOGY_UNAVAILABLE_MESSAGE) ? error : null
   const [isLocatingUser, setIsLocatingUser] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(cachedInitialLocationResult?.error ?? null)
   const [hasSelection, setHasSelection] = useState(false)
@@ -1557,7 +1558,7 @@ export default function GeoRiskMap() {
               {mobileFeedbackStateLabel}
             </span>
           </div>
-          {(!quotaReached || riskData) && (
+          {(!mapNotice || riskData) && (
             <p className={cn("mt-1 text-sm leading-5", isDarkMode ? "text-slate-300" : "text-slate-600")}>
               {mobileFeedbackHelperText}
             </p>
@@ -1732,17 +1733,17 @@ export default function GeoRiskMap() {
           </div>
         )}
 
-        {quotaReached && (
+        {mapNotice && (
           <div role="status" className="pointer-events-none absolute inset-x-3 top-16 z-20 flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-3 text-sm leading-5 text-amber-950 shadow-sm dark:border-amber-400/40 dark:bg-slate-950 dark:text-amber-100 lg:inset-x-auto lg:right-4 lg:top-4 lg:max-w-sm">
             <ShieldAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
-              <p className="font-semibold">{RISK_QUOTA_MESSAGE}</p>
-              <p className="mt-1">A cota é renovada às 21h, no horário de Brasília.</p>
+              <p className="font-semibold">{mapNotice}</p>
+              {quotaReached && <p className="mt-1">A cota é renovada às 21h, no horário de Brasília.</p>}
             </div>
           </div>
         )}
 
-        <div className={cn("pointer-events-none absolute inset-x-3 top-16 z-[1] lg:hidden", quotaReached && "hidden")}>
+        <div className={cn("pointer-events-none absolute inset-x-3 top-16 z-[1] lg:hidden", mapNotice && "hidden")}>
           <div
             role="status"
             aria-live="polite"
@@ -1779,7 +1780,7 @@ export default function GeoRiskMap() {
           </div>
         </div>
 
-        <div className={cn("pointer-events-none absolute right-3 top-3 z-20 hidden sm:right-4 sm:top-4", !quotaReached && "lg:block")}>
+        <div className={cn("pointer-events-none absolute right-3 top-3 z-20 hidden sm:right-4 sm:top-4", !mapNotice && "lg:block")}>
           <div
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium shadow-sm",
