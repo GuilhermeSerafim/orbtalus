@@ -5,6 +5,21 @@ export type RiskLevel = "baixo" | "medio" | "alto";
 export const RISK_QUOTA_MESSAGE = "Limite diário de análises atingido. Tente novamente mais tarde.";
 export const HYDROLOGY_UNAVAILABLE_MESSAGE = "Os dados de rios e córregos nesta área são insuficientes para classificar o risco.";
 
+const HYDROLOGY_MESSAGES: Record<string, string> = {
+  HYDROLOGY_UNAVAILABLE: HYDROLOGY_UNAVAILABLE_MESSAGE,
+  HYDROLOGY_LOOKUP_FAILED: "Não foi possível consultar os rios desta área agora. Tente novamente mais tarde.",
+  HYDROLOGY_NO_WATERWAY: "A consulta não encontrou rio ou córrego mapeado em um raio de 5 km do ponto analisado.",
+};
+
+export class HydrologyError extends Error {
+  readonly reference: string | null;
+
+  constructor(message: string, requestId: string | null) {
+    super(message);
+    this.reference = requestId && /^[0-9a-f]{32}$/.test(requestId) ? requestId.slice(0, 12) : null;
+  }
+}
+
 type FactorScores = {
   topography?: number;
   water_frequency?: number;
@@ -57,7 +72,6 @@ const MESSAGES = {
 const UNAVAILABLE_MESSAGES: Record<string, string> = {
   CONFIG_UNAVAILABLE: MESSAGES.config,
   DATA_UNAVAILABLE: "Dados necessários à análise estão indisponíveis. Tente novamente mais tarde.",
-  HYDROLOGY_UNAVAILABLE: HYDROLOGY_UNAVAILABLE_MESSAGE,
   DATABASE_UNAVAILABLE: MESSAGES.generic,
   AI_UNAVAILABLE: "Parecer técnico indisponível. Tente novamente mais tarde.",
 };
@@ -173,6 +187,9 @@ export async function postRiskPolygon(polygon: Polygon | Feature<Polygon>): Prom
     if (res.status === 503) {
       const body: unknown = await res.json().catch(() => null);
       const code = record(body) && record(body.detail) ? body.detail.code : undefined;
+      if (typeof code === "string" && Object.hasOwn(HYDROLOGY_MESSAGES, code)) {
+        throw new HydrologyError(HYDROLOGY_MESSAGES[code], res.headers.get("X-Request-ID"));
+      }
       const message = typeof code === "string" && Object.hasOwn(UNAVAILABLE_MESSAGES, code)
         ? UNAVAILABLE_MESSAGES[code] : MESSAGES.config;
       throw new Error(message);

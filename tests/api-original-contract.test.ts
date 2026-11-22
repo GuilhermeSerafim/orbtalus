@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, mock, test } from 'node:test';
 import type { Polygon } from 'geojson';
-import { isRiskResponse, postRiskPolygon, postRiskByCenterRadius } from '../lib/api';
+import { HydrologyError, isRiskResponse, postRiskPolygon, postRiskByCenterRadius } from '../lib/api';
 
 const messages = {
   config: 'Serviço de análise indisponível. Tente novamente mais tarde.',
@@ -182,12 +182,21 @@ const safeCodes: Record<string,string> = {
   CONFIG_UNAVAILABLE: messages.config,
   DATA_UNAVAILABLE: 'Dados necessários à análise estão indisponíveis. Tente novamente mais tarde.',
   HYDROLOGY_UNAVAILABLE: 'Os dados de rios e córregos nesta área são insuficientes para classificar o risco.',
+  HYDROLOGY_LOOKUP_FAILED: 'Não foi possível consultar os rios desta área agora. Tente novamente mais tarde.',
+  HYDROLOGY_NO_WATERWAY: 'A consulta não encontrou rio ou córrego mapeado em um raio de 5 km do ponto analisado.',
   DATABASE_UNAVAILABLE: messages.generic,
   AI_UNAVAILABLE: 'Parecer técnico indisponível. Tente novamente mais tarde.',
 };
 for (const [code,message] of Object.entries(safeCodes)) test(`503 ${code} uses local fixed text`, async () => {
   reply = async () => new Response(JSON.stringify({detail:{code,message:'postgres://secret:token@private/traceback'}}),{status:503});
   await rejects(message);
+});
+test('ignores a malformed support reference on a hydrology error', async () => {
+  reply = async () => Response.json({detail: {code: 'HYDROLOGY_LOOKUP_FAILED'}}, {
+    status: 503, headers: {'X-Request-ID': 'untrusted reference'},
+  });
+  await assert.rejects(() => postRiskPolygon(polygon), error =>
+    error instanceof HydrologyError && error.message === safeCodes.HYDROLOGY_LOOKUP_FAILED && error.reference === null);
 });
 for (const status of [422,503,500,401]) for (const body of ['<html>secret token postgres://dsn</html>', JSON.stringify({detail:{code:'UNKNOWN',message:'secret'}})]) test(`safe error ${status} with untrusted body ${body[0]}`, async () => {
   reply = async () => new Response(body,{status});
