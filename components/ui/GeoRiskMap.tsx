@@ -22,7 +22,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import ReactMarkdown from "react-markdown"
 import type { Feature, Polygon } from "geojson"
 
-import { HydrologyError, postRiskByCenterRadius, RISK_QUOTA_MESSAGE, type RiskLevel, type RiskResponse } from "@/lib/api"
+import { HydrologyError, postRiskByCenterRadius, RISK_QUOTA_MESSAGE, type AnalysisResponse, type RiskLevel, type RiskResponse } from "@/lib/api"
+import { PartialRiskResult } from "@/components/partial-risk-result"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -209,6 +210,7 @@ function getMapStyle(theme: string | undefined) {
 
 function getRiskDisplay(params: {
   level: RiskLevel | undefined
+  isPartial?: boolean
   isLoading: boolean
   hasSelection: boolean
   hasError: boolean
@@ -229,6 +231,13 @@ function getRiskDisplay(params: {
       color: "#dc2626",
       badge:
         "border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-950/60 dark:text-red-200",
+    }
+  }
+
+  if (params.isPartial) {
+    return {
+      label: "Resultado parcial", color: "#64748b",
+      badge: "border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
     }
   }
 
@@ -669,7 +678,9 @@ export default function GeoRiskMap() {
 
   const [center, setCenter] = useState<MapCenter>(DEFAULT_CENTER)
   const [radius, setRadius] = useState(DEFAULT_RADIUS)
-  const [riskData, setRiskData] = useState<RiskResponse | null>(null)
+  const [analysis, setRiskData] = useState<AnalysisResponse | null>(null)
+  const partialResult = analysis?.analysis_status === "partial" ? analysis : null
+  const riskData = analysis?.analysis_status === "partial" ? null : analysis
   const [isLoading, setIsLoading] = useState(false)
   const [analysisError, setError] = useState<Error | null>(null)
   const error = analysisError?.message ?? null
@@ -684,7 +695,7 @@ export default function GeoRiskMap() {
 
   const totalScore = getTotalScore(riskData)
   const normalizedRiskLevel = deriveRiskLevel(riskData?.risk_level, totalScore)
-  const currentMapStateRef = useRef({ center, radius, requestedRadius: radius, normalizedRiskLevel, isLoading, hasSelection, error, is3DMode, effectiveResolvedTheme })
+  const currentMapStateRef = useRef({ center, radius, requestedRadius: radius, normalizedRiskLevel, isPartial: Boolean(partialResult), isLoading, hasSelection, error, is3DMode, effectiveResolvedTheme })
   // Preserve an existing selection when Fast Refresh re-runs effects.
   currentMapStateRef.current.requestedRadius ??= radius
   // SDK callbacks can run before React commits. Update this snapshot at each
@@ -696,7 +707,7 @@ export default function GeoRiskMap() {
     mapStatusRef.current = "error"
     styleReadyRef.current = false
     latestRequestRef.current += 1
-    Object.assign(currentMapStateRef.current, { normalizedRiskLevel: undefined, isLoading: false, error: null })
+    Object.assign(currentMapStateRef.current, { normalizedRiskLevel: undefined, isPartial: false, isLoading: false, error: null })
     setMapStatus("error")
     setRiskData(null)
     setError(null)
@@ -731,6 +742,7 @@ export default function GeoRiskMap() {
   )
   const riskDisplay = getRiskDisplay({
     level: normalizedRiskLevel,
+    isPartial: Boolean(partialResult),
     isLoading,
     hasSelection,
     hasError: Boolean(error),
@@ -1042,7 +1054,7 @@ export default function GeoRiskMap() {
 
     const requestId = ++latestRequestRef.current
     Object.assign(currentMapStateRef.current, {
-      center: nextCenter, radius: nextRadius, requestedRadius: nextRadius, normalizedRiskLevel: undefined,
+      center: nextCenter, radius: nextRadius, requestedRadius: nextRadius, normalizedRiskLevel: undefined, isPartial: false,
       isLoading: true, hasSelection: true, error: null,
     })
     setRiskData(null)
@@ -1061,11 +1073,13 @@ export default function GeoRiskMap() {
 
       if (requestId !== latestRequestRef.current) return
 
-      const dataLevel = deriveRiskLevel(data.risk_level, getTotalScore(data))
-      Object.assign(currentMapStateRef.current, { normalizedRiskLevel: dataLevel, isLoading: false, error: null })
+      const isPartial = data.analysis_status === "partial"
+      const dataLevel = isPartial ? undefined : deriveRiskLevel(data.risk_level, getTotalScore(data))
+      Object.assign(currentMapStateRef.current, { normalizedRiskLevel: dataLevel, isPartial, isLoading: false, error: null })
       setRiskData(data)
       const dataColor = getRiskDisplay({
         level: dataLevel,
+        isPartial,
         isLoading: false,
         hasSelection: true,
         hasError: false,
@@ -1208,10 +1222,10 @@ export default function GeoRiskMap() {
 
       if (currentMapStateRef.current.hasSelection) {
         const selection = currentMapStateRef.current
-        if (selection.normalizedRiskLevel) {
+        if (selection.normalizedRiskLevel || selection.isPartial) {
           // Recreating the map must not discard a completed result or call providers again.
           drawCircle(selection.center, selection.radius, getRiskDisplay({
-            level: selection.normalizedRiskLevel, isLoading: false, hasSelection: true, hasError: false,
+            level: selection.normalizedRiskLevel, isPartial: selection.isPartial, isLoading: false, hasSelection: true, hasError: false,
           }).color)
           return
         }
@@ -1315,6 +1329,7 @@ export default function GeoRiskMap() {
       const current = currentMapStateRef.current
       const color = getRiskDisplay({
         level: current.normalizedRiskLevel,
+        isPartial: current.isPartial,
         isLoading: current.isLoading,
         hasSelection: current.hasSelection,
         hasError: Boolean(current.error),
@@ -1367,7 +1382,7 @@ export default function GeoRiskMap() {
     const resetZoom = userInitialCenterRef.current ? USER_LOCATION_ZOOM : BRAZIL_OVERVIEW_ZOOM
     radiusRef.current = DEFAULT_RADIUS
     Object.assign(currentMapStateRef.current, {
-      center: resetCenter, radius: DEFAULT_RADIUS, normalizedRiskLevel: undefined,
+      center: resetCenter, radius: DEFAULT_RADIUS, normalizedRiskLevel: undefined, isPartial: false,
       isLoading: false, error: null, hasSelection: false, is3DMode: false,
     })
     setCenter(resetCenter)
@@ -1403,7 +1418,7 @@ export default function GeoRiskMap() {
     }
   }
 
-  const renderRiskEngineContent = () => (
+  const renderRiskEngineContent = () => partialResult ? <PartialRiskResult data={partialResult} /> : (
     <div className="space-y-4">
       <Card className={cn("gap-4 overflow-hidden py-4 border-none lg:gap-3 lg:py-3 lg:border-solid", widgetTone.shell)}>
         <CardHeader className="px-4">
@@ -1772,14 +1787,14 @@ export default function GeoRiskMap() {
               </div>
             </div>
 
-            <span
+            {!partialResult && <span
               className={cn(
                 "inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-semibold shadow-sm",
                 riskDisplay.badge
               )}
             >
               {mobileStatusScoreLabel}
-            </span>
+            </span>}
           </div>
         </div>
 
@@ -1854,13 +1869,13 @@ export default function GeoRiskMap() {
             <DrawerTrigger asChild>
               <Button size="lg" className="min-h-[48px] rounded-full px-6 shadow-xl">
                 <Eye className="mr-2 h-4 w-4" />
-                Analise Completa
+                {partialResult ? "Ver dados disponíveis" : "Analise Completa"}
               </Button>
             </DrawerTrigger>
             <DrawerContent className="max-h-[88vh] overflow-hidden">
               <DrawerHeader className="relative shrink-0 pb-2 pr-16 text-left">
-                <DrawerTitle>Analise Completa</DrawerTitle>
-                <DrawerDescription>Feedback da IA primeiro, seguido pelos fatores tecnicos da leitura.</DrawerDescription>
+                <DrawerTitle>{partialResult ? "Dados disponíveis" : "Analise Completa"}</DrawerTitle>
+                <DrawerDescription>{partialResult ? "Medições e cobertura ambiental do ponto selecionado." : "Feedback da IA primeiro, seguido pelos fatores tecnicos da leitura."}</DrawerDescription>
                 <DrawerClose asChild>
                   <Button variant="ghost" size="icon" className="absolute right-4 top-4 h-11 w-11" aria-label="Fechar analise">
                     <X className="h-4 w-4" />
@@ -1869,13 +1884,13 @@ export default function GeoRiskMap() {
               </DrawerHeader>
               <div
                 role="region"
-                aria-label="Conteúdo completo da análise"
+                aria-label={partialResult ? "Dados disponíveis" : "Conteúdo completo da análise"}
                 tabIndex={0}
                 data-vaul-no-drag
                 className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-4 pt-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
               >
                 <div className="space-y-4">
-                  {renderAiFeedback()}
+                  {!partialResult && renderAiFeedback()}
                   {renderRiskEngineContent()}
                 </div>
               </div>

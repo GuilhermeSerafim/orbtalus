@@ -38,6 +38,7 @@ export type EnvironmentalData = {
   provider_status?: string;
 };
 export type RiskResponse = {
+  analysis_status?: never;
   distancia_rio_m: number;
   queda_relativa_m: number | null;
   rio_mais_proximo: string;
@@ -60,6 +61,25 @@ export type RiskResponse = {
   risk_calculation?: RiskCalculation;
   environmental_data?: EnvironmentalData;
 };
+export type PartialRiskResponse = {
+  analysis_status: "partial";
+  missing_indicators: ("soil" | "water_frequency")[];
+  distancia_rio_m: number;
+  queda_relativa_m: number;
+  rio_mais_proximo: string;
+  tipo_hidrografia: string;
+  debug_coords: { rio_lat: number; rio_lon: number };
+  environmental_data: {
+    soil: { class_id: number; class_name: string; is_permeable: boolean } | null;
+    water_frequency: { years: number; confidence: number } | null;
+    data_source: string;
+    provider_status: "partial";
+  };
+  risk_level: null;
+  risk_calculation: null;
+  resposta_ia: null;
+};
+export type AnalysisResponse = RiskResponse | PartialRiskResponse;
 
 // Only local copy is shown to the user; never reflect URLs or upstream text.
 const MESSAGES = {
@@ -88,6 +108,7 @@ const score: Validator = value => finite(value) && value >= 0 && value <= 100;
 const fraction: Validator = value => finite(value) && value >= 0 && value <= 1;
 const latitude: Validator = value => finite(value) && Math.abs(value) <= 90;
 const longitude: Validator = value => finite(value) && Math.abs(value) <= 180;
+const riverCoords: Validator = coords => record(coords) && latitude(coords.rio_lat) && longitude(coords.rio_lon);
 const optional = (value: RecordValue, fields: Record<string, Validator>) =>
   Object.entries(fields).every(([key, validate]) => !(key in value) || validate(value[key]));
 const nested = (fields: Record<string, Validator>): Validator => value => record(value) && optional(value, fields);
@@ -104,16 +125,36 @@ function agree(values: Array<number | undefined>, normalize = (value: number) =>
   return present.every(value => Math.abs(value - present[0]) <= 1e-9);
 }
 
-export function isRiskResponse(value: unknown): value is RiskResponse {
-  if (!record(value) || !nonnegative(value.distancia_rio_m) ||
+function isPartialResult(value: RecordValue) {
+  const env = value.environmental_data;
+  if (!record(env) || env.provider_status !== "partial" || !text(env.data_source) ||
+      !finite(value.queda_relativa_m) || !text(value.tipo_hidrografia) || !riverCoords(value.debug_coords) ||
+      value.risk_level !== null || value.risk_calculation !== null || value.resposta_ia !== null ||
+      aliasGroups.flat().some(key => key in value) || "water_frequency_years" in value) return false;
+  const {soil, water_frequency: water} = env;
+  if (soil !== null && !(record(soil) && finite(soil.class_id) && Number.isInteger(soil.class_id) &&
+      text(soil.class_name) && typeof soil.is_permeable === "boolean")) return false;
+  if (water !== null && !(record(water) && finite(water.years) && Number.isInteger(water.years) &&
+      water.years >= 0 && water.years <= 30 && fraction(water.confidence))) return false;
+  const missing = value.missing_indicators;
+  const expected = ["soil", "water_frequency"].filter(key => env[key] === null);
+  return Array.isArray(missing) && expected.length > 0 && missing.length === expected.length &&
+    expected.every(key => missing.includes(key));
+}
+
+export function isRiskResponse(value: unknown): value is AnalysisResponse {
+  if (!record(value) || !nonnegative(value.distancia_rio_m) || !text(value.rio_mais_proximo)) return false;
+  if (value.analysis_status === "partial") return isPartialResult(value);
+  if ("analysis_status" in value || "missing_indicators" in value ||
+      (record(value.environmental_data) && value.environmental_data.provider_status === "partial") ||
       !(value.queda_relativa_m === null || finite(value.queda_relativa_m)) ||
-      !text(value.rio_mais_proximo) || !text(value.resposta_ia) || !text(value.risk_level)) return false;
+      !text(value.resposta_ia) || !text(value.risk_level)) return false;
   if (!optional(value, {
     ...Object.fromEntries(aliasGroups.flat().map(key => [key, score])),
     tipo_hidrografia: string,
     risk_model_version: string,
     water_frequency_years: nonnegative,
-    debug_coords: coords => record(coords) && latitude(coords.rio_lat) && longitude(coords.rio_lon),
+    debug_coords: riverCoords,
     risk_calculation: nested({confidence: fraction, total_score: score,
       component_scores: nested(factorFields(score)), weights_applied: nested(factorFields(fraction))}),
     environmental_data: nested({
@@ -169,7 +210,7 @@ function polygonGeometry(value: unknown): Polygon {
   return geometry as unknown as Polygon;
 }
 
-export async function postRiskPolygon(polygon: Polygon | Feature<Polygon>): Promise<RiskResponse> {
+export async function postRiskPolygon(polygon: Polygon | Feature<Polygon>): Promise<AnalysisResponse> {
   const url = riskUrl();
   const geometry = polygonGeometry(polygon);
   let res: Response;
@@ -203,7 +244,7 @@ export async function postRiskPolygon(polygon: Polygon | Feature<Polygon>): Prom
 
 export async function postRiskByCenterRadius(params: {
   lat: number; lng: number; radiusMeters: number;
-}): Promise<RiskResponse> {
+}): Promise<AnalysisResponse> {
   if (!params || !latitude(params.lat) || !longitude(params.lng) ||
       !finite(params.radiusMeters) || params.radiusMeters <= 0) throw new Error(MESSAGES.input);
   const circleFeature = turfCircle([params.lng, params.lat], params.radiusMeters / 1000, {
