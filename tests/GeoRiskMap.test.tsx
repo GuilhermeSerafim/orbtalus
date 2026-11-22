@@ -100,6 +100,65 @@ test('shows a single quota warning directly on the map after HTTP 429', async ()
   assert.doesNotMatch(text(view), /Falha na analise/);
 });
 
+test('partial coverage shows observed measurements, missing fields and neutral selection across style changes', async () => {
+  const { view, map } = mount();
+  click(map);
+  await act(async () => requests[0].resolve(Response.json({
+    analysis_status: 'partial', missing_indicators: ['soil'], distancia_rio_m: 349.5, queda_relativa_m: -6,
+    rio_mais_proximo: 'Rio Pinheiros', tipo_hidrografia: 'river', debug_coords: {rio_lat: -23, rio_lon: -46},
+    environmental_data: {soil: null, water_frequency: {years: 0, confidence: 1}, data_source: 'MapBiomas', provider_status: 'partial'},
+    risk_level: null, risk_calculation: null, resposta_ia: null,
+  })));
+  const engine = view.getByRole('complementary', { name: 'Motor de risco' });
+  assert.match(engine.textContent ?? '', /Resultado parcial/);
+  assert.match(engine.textContent ?? '', /Faltou a medição de solo, por isso não foi possível calcular a nota de risco\./);
+  assert.match(engine.textContent ?? '', /Rio Pinheiros/);
+  assert.match(engine.textContent ?? '', /349,5 m/);
+  assert.match(engine.textContent ?? '', /SoloSem medição/);
+  assert.match(engine.textContent ?? '', /0 de 30 anos/);
+  assert.doesNotMatch(text(view), /Baixo risco|Alto risco|Risco medio|Classificacao pendente|Ver Analise Completa|Feedback da IA|Falha na analise/);
+  assert.equal(color(map), '#64748b');
+  state.theme = 'dark'; view.rerender(<GeoRiskMap />);
+  act(() => map.emit('style.load'));
+  assert.equal(color(map), '#64748b');
+  assert.equal(requests.length, 1);
+});
+
+test('mobile partial result opens observations without a pending score or AI feedback', async () => {
+  const { view, map } = mount();
+  click(map);
+  await act(async () => requests[0].resolve(Response.json({
+    analysis_status: 'partial', missing_indicators: ['water_frequency'], distancia_rio_m: 15, queda_relativa_m: 0,
+    rio_mais_proximo: 'Córrego local', tipo_hidrografia: 'stream', debug_coords: {rio_lat: -23, rio_lon: -46},
+    environmental_data: {soil: {class_id: 24, class_name: 'Área urbanizada', is_permeable: false},
+      water_frequency: null, data_source: 'MapBiomas', provider_status: 'partial'},
+    risk_level: null, risk_calculation: null, resposta_ia: null,
+  })));
+  const status = view.getAllByRole('status').find(node => node.textContent?.includes('Resultado parcial'));
+  assert.ok(status);
+  assert.doesNotMatch(status.textContent ?? '', /\.\.\./);
+  fireEvent.click(view.getByRole('button', {name: 'Ver dados disponíveis'}));
+  const details = view.getByRole('dialog');
+  assert.match(details.textContent ?? '', /Área urbanizada · impermeável/);
+  assert.match(details.textContent ?? '', /Faltou a medição de frequência histórica de água, por isso não foi possível calcular a nota de risco\./);
+  assert.match(details.textContent ?? '', /Frequência histórica de água no entornoSem medição/);
+  assert.doesNotMatch(details.textContent ?? '', /Feedback da IA|Em preparo|Classifica[cç][aã]o pendente/i);
+});
+
+test('partial result names both absent measurements without attributing a cause', async () => {
+  const { view, map } = mount();
+  click(map);
+  await act(async () => requests[0].resolve(Response.json({
+    analysis_status: 'partial', missing_indicators: ['water_frequency', 'soil'], distancia_rio_m: 20, queda_relativa_m: -1,
+    rio_mais_proximo: 'Rio local', tipo_hidrografia: 'river', debug_coords: {rio_lat: -23, rio_lon: -46},
+    environmental_data: {soil: null, water_frequency: null, data_source: 'MapBiomas', provider_status: 'partial'},
+    risk_level: null, risk_calculation: null, resposta_ia: null,
+  })));
+  const engine = view.getByRole('complementary', {name: 'Motor de risco'});
+  assert.match(engine.textContent ?? '', /Faltaram as medições de solo e de frequência histórica de água, por isso não foi possível calcular a nota de risco\./);
+  assert.match(engine.textContent ?? '', /Curso d’água mapeado mais próximoRio local/);
+});
+
 test('explains insufficient local hydrography directly on the map without a risk score', async () => {
   const { view, map } = mount();
   click(map);

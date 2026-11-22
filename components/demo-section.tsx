@@ -5,13 +5,14 @@ import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { postRiskByCenterRadius, type RiskResponse } from "@/lib/api";
+import { postRiskByCenterRadius, type AnalysisResponse } from "@/lib/api";
+import { PartialRiskResult } from "@/components/partial-risk-result";
 import ReactMarkdown from "react-markdown";
 
 export default function DemoSection() {
   const [coordinates, setCoordinates] = useState("-25.43, -49.27");
   const [radius, setRadius] = useState(1000);
-  const [riskData, setRiskData] = useState<RiskResponse | null>(null);
+  const [riskData, setRiskData] = useState<AnalysisResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -139,7 +140,7 @@ export default function DemoSection() {
             )}
 
             {/* 🔹 Se existir resposta, renderiza o resultado */}
-            {riskData && (
+            {riskData?.analysis_status === "partial" ? <PartialRiskResult data={riskData} /> : riskData && (
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}

@@ -22,6 +22,11 @@ const complete = {
 };
 const polygon: Polygon = { type: 'Polygon', coordinates: [[[-46,-23],[-46.001,-23],[-46,-23.001],[-46,-23]]] };
 const center = { lat: -23, lng: -46, radiusMeters: 100 };
+const partial = {
+  ...complete, analysis_status: 'partial', missing_indicators: ['soil'],
+  risk_level: null, risk_calculation: null, resposta_ia: null,
+  environmental_data: {...complete.environmental_data, soil: null, provider_status: 'partial'},
+};
 let calls: Array<{ url: string; init?: RequestInit }>;
 let reply: () => Promise<Response>;
 beforeEach(() => {
@@ -51,6 +56,28 @@ for (const [name, value] of Object.entries({ minimal, complete, zero: {...minima
     assert.deepEqual(await postRiskPolygon(polygon), value);
   });
 }
+const soil = {class_id: 24, class_name: 'Área urbanizada', is_permeable: false};
+for (const [name, value] of Object.entries({
+  soilMissing: partial,
+  waterMissing: {...partial, missing_indicators: ['water_frequency'], environmental_data: {...partial.environmental_data, soil, water_frequency: null}},
+  bothMissing: {...partial, missing_indicators: ['water_frequency', 'soil'], environmental_data: {...partial.environmental_data, water_frequency: null}},
+})) test(`accepts partial ${name} and preserves observed measurements`, async () => {
+  succeedsWith(value);
+  assert.deepEqual(await postRiskPolygon(polygon), value);
+});
+for (const [name, overrides] of Object.entries({
+  unmarked: {analysis_status: undefined}, unknownStatus: {analysis_status: 'unknown'},
+  classified: {risk_level: 'baixo'}, score: {total_score: 0}, calculation: {risk_calculation: {}}, ai: {resposta_ia: 'Resumo'},
+  inconsistentMissing: {missing_indicators: ['water_frequency']}, duplicatedMissing: {missing_indicators: ['soil','soil']},
+  unexpectedIndicator: {missing_indicators: ['soil','topography']}, noMissing: {missing_indicators: []},
+  missingElevation: {queda_relativa_m: null}, missingCoords: {debug_coords: undefined},
+  incompleteSoil: {missing_indicators: ['water_frequency'], environmental_data: {...partial.environmental_data, soil: {}, water_frequency: null}},
+  invalidWater: {environmental_data: {...partial.environmental_data, water_frequency: {years: 31, confidence: 1}}},
+  statusMismatch: {environmental_data: {...partial.environmental_data, provider_status: 'OK'}},
+})) test(`rejects inconsistent partial result: ${name}`, async () => {
+  succeedsWith({...partial, ...overrides});
+  await rejects(messages.response);
+});
 test('sends Polygon from Feature without properties and normalizes /docs/', async () => {
   process.env.NEXT_PUBLIC_API_BASE_URL = ' https://analysis.example.test/api/docs/ ';
   process.env.NEXT_PUBLIC_API_RISK_ENDPOINT = 'geo/risk';
