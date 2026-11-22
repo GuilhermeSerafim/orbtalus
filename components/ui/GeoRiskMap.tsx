@@ -22,7 +22,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import ReactMarkdown from "react-markdown"
 import type { Feature, Polygon } from "geojson"
 
-import { HYDROLOGY_UNAVAILABLE_MESSAGE, postRiskByCenterRadius, RISK_QUOTA_MESSAGE, type RiskLevel, type RiskResponse } from "@/lib/api"
+import { HydrologyError, postRiskByCenterRadius, RISK_QUOTA_MESSAGE, type RiskLevel, type RiskResponse } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -671,9 +671,11 @@ export default function GeoRiskMap() {
   const [radius, setRadius] = useState(DEFAULT_RADIUS)
   const [riskData, setRiskData] = useState<RiskResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [analysisError, setError] = useState<Error | null>(null)
+  const error = analysisError?.message ?? null
+  const hydrologyError = analysisError instanceof HydrologyError ? analysisError : null
   const quotaReached = mapStatus === "ready" && error === RISK_QUOTA_MESSAGE
-  const mapNotice = mapStatus === "ready" && (quotaReached || error === HYDROLOGY_UNAVAILABLE_MESSAGE) ? error : null
+  const mapNotice = mapStatus === "ready" && (quotaReached || hydrologyError) ? error : null
   const [isLocatingUser, setIsLocatingUser] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(cachedInitialLocationResult?.error ?? null)
   const [hasSelection, setHasSelection] = useState(false)
@@ -1072,10 +1074,10 @@ export default function GeoRiskMap() {
     } catch (apiError) {
       if (requestId !== latestRequestRef.current) return
 
-      const message = apiError instanceof Error ? apiError.message : "Falha ao consultar a API de risco."
-      Object.assign(currentMapStateRef.current, { normalizedRiskLevel: undefined, isLoading: false, error: message })
+      const failure = apiError instanceof Error ? apiError : new Error("Falha ao consultar a API de risco.")
+      Object.assign(currentMapStateRef.current, { normalizedRiskLevel: undefined, isLoading: false, error: failure.message })
       setRiskData(null)
-      setError(message)
+      setError(failure)
       drawCircle(nextCenter, nextRadius, "#64748b")
     } finally {
       if (requestId === latestRequestRef.current) {
@@ -1738,6 +1740,7 @@ export default function GeoRiskMap() {
             <ShieldAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
               <p className="font-semibold">{mapNotice}</p>
+              {hydrologyError?.reference && <p className="mt-1 text-xs">Referência: {hydrologyError.reference}</p>}
               {quotaReached && <p className="mt-1">A cota é renovada às 21h, no horário de Brasília.</p>}
             </div>
           </div>

@@ -110,6 +110,22 @@ test('explains insufficient local hydrography directly on the map without a risk
   assert.doesNotMatch(text(view), /Score [\d,]+%|cota é renovada/i);
 });
 
+for (const [code, explanation] of [
+  ['HYDROLOGY_LOOKUP_FAILED', /não foi possível consultar os rios/i],
+  ['HYDROLOGY_NO_WATERWAY', /não encontrou rio ou córrego mapeado em um raio de 5 km/i],
+] as const) test(`the map announces ${code} with the support reference`, async () => {
+  const { view, map } = mount();
+  click(map);
+  await act(async () => { requests[0].resolve(Response.json({detail: {code, message: 'UPSTREAM_PRIVATE'}}, {
+    status: 503, headers: {'X-Request-ID': '0123456789abcdef0123456789abcdef'},
+  })); });
+  const notice = view.getAllByRole('status').find(element => explanation.test(element.textContent ?? ''));
+  assert.ok(notice, 'the distinct explanation is visible on the map');
+  assert.match(notice.textContent ?? '', /Referência: 0123456789ab/);
+  assert.doesNotMatch(text(view), /UPSTREAM_PRIVATE|Score [\d,]+%|cota é renovada/i);
+  assert.equal(requests.length, 1);
+});
+
 test('successful theme replacement completes the SDK full-load lifecycle without false timeout or report loss', async (t) => {
   const { timers } = captureMapTimeouts(t);
   const { view, map } = mount(); click(map); await resolve(0, response('THEME_REPORT'));
