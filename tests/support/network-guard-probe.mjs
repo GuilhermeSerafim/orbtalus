@@ -8,6 +8,8 @@ import dgram, * as dgramExports from 'node:dgram';
 import dns, * as dnsExports from 'node:dns';
 import dnsPromises, * as promiseExports from 'node:dns/promises';
 import { syncBuiltinESMExports } from 'node:module';
+import { tmpdir, userInfo } from 'node:os';
+import { join } from 'node:path';
 
 let originalCalls = 0;
 const sentinel = () => { originalCalls++; throw new Error('ORIGINAL_NETWORK_CALLED'); };
@@ -65,6 +67,9 @@ for (const path of ['\\\\?\\pipe\\tsx-test', '\\\\.\\pipe\\tsx-test']) {
   add(`local pipe options ${path}`, () => net.Socket.prototype.connect.call({}, {path}), true);
   add(`local pipe normalized ${path}`, () => net.Socket.prototype.connect.call({}, [{path}]), true);
 }
+const tsxParentPipe = join(tmpdir(), `tsx-${process.geteuid?.() ?? userInfo().username}`, `${process.ppid}.pipe`);
+add('tsx parent IPC in socket options', () => net.Socket.prototype.connect.call({}, [{path: tsxParentPipe}]), true);
+add('unrelated local socket', () => net.Socket.prototype.connect.call({}, {path: join(tmpdir(), 'other.sock')}));
 syncBuiltinESMExports();
 await import('./network-guard.mjs');
 const results = [];
