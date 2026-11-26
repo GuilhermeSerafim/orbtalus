@@ -6,15 +6,19 @@ import https from 'node:https';
 import dgram from 'node:dgram';
 import dns from 'node:dns';
 import { syncBuiltinESMExports } from 'node:module';
+import { tmpdir, userInfo } from 'node:os';
+import { join } from 'node:path';
 let attempts = 0;
 let blockedLocalPipes = 0;
+const tsxParentPipe = join(tmpdir(), `tsx-${process.geteuid?.() ?? userInfo().username}`, `${process.ppid}.pipe`);
 const deny = () => { attempts++; throw new Error('TEST_NETWORK_FORBIDDEN'); };
 net.Socket.prototype.connect = function (...args) {
-  // tsx checks for an optional parent via Windows named pipe. Deny that too,
+  // tsx checks for a parent via a local socket or Windows named pipe. Deny it,
   // but distinguish it from TCP/HTTP egress. Never call the original connect.
   const options = Array.isArray(args[0]) ? args[0][0] : args[0];
   const path = typeof options === 'string' ? options : options?.path;
-  if (typeof path === 'string' && (path.startsWith('\\\\?\\pipe\\') || path.startsWith('\\\\.\\pipe\\'))) {
+  if (path === tsxParentPipe ||
+      (typeof path === 'string' && (path.startsWith('\\\\?\\pipe\\') || path.startsWith('\\\\.\\pipe\\')))) {
     blockedLocalPipes++;
     throw new Error('TEST_LOCAL_PIPE_FORBIDDEN');
   }
